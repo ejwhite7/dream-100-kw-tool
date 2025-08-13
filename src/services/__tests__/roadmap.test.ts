@@ -81,7 +81,7 @@ describe('RoadmapGenerationService', () => {
         }
       });
 
-      let progressUpdates: any[] = [];
+      const progressUpdates: any[] = [];
       const onProgress = (progress: any) => {
         progressUpdates.push(progress);
       };

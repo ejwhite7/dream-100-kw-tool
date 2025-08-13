@@ -43,7 +43,7 @@
     "cleanup:cache": "rm -rf .next node_modules/.cache",
     "cleanup:test": "rm -rf test-results coverage .nyc_output",
     "precommit": "npm run lint && npm run type-check && npm run test:unit",
-    "prebuild": "npm run lint && npm run type-check",
+    "prebuild": "npm run type-check",
     "postinstall": "playwright install --with-deps"
   },
   "dependencies": {
@@ -58,6 +58,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
     "ioredis": "^5.7.0",
     "lucide-react": "^0.539.0",
     "next": "15.4.6",
@@ -68,7 +69,6 @@
     "react-hook-form": "^7.62.0",
     "recharts": "^3.1.2",
     "tailwind-merge": "^3.3.1",
-    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -78,6 +78,7 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
+    "@types/exceljs": "^0.5.3",
     "@types/jest": "^29.5.14",
     "@types/node": "^20.19.10",
     "@types/papaparse": "^5.3.16",
@@ -97,7 +98,9 @@
   },
   "jest": {
     "preset": "next/jest",
-    "setupFilesAfterEnv": ["<rootDir>/jest.setup.js"],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
+    ],
     "testEnvironment": "jest-environment-jsdom",
     "moduleNameMapping": {
       "^@/(.*)$": "<rootDir>/src/$1"

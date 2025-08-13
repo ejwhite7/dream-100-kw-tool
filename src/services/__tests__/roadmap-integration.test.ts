@@ -55,7 +55,7 @@ describe('Roadmap Generation Integration Tests', () => {
       const clusters = createRealisticMarketingClusters();
       const generationConfig = createRealisticGenerationConfig();
 
-      let progressSteps: string[] = [];
+      const progressSteps: string[] = [];
       const onProgress = (progress: any) => {
         progressSteps.push(progress.stage);
       };

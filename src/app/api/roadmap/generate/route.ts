@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { RoadmapGenerationService } from '../../../../services/roadmap';
 import { RoadmapGenerationConfigSchema } from '../../../../models/roadmap';
 import { ErrorHandler } from '../../../../utils/error-handler';
+import type { ClusterWithKeywords } from '../../../../models/cluster';
 import * as Sentry from '@sentry/nextjs';
 
 // Request validation schema
@@ -44,9 +45,9 @@ interface GenerateRoadmapResponse {
 
 export async function POST(request: NextRequest): Promise<NextResponse<GenerateRoadmapResponse>> {
   const startTime = Date.now();
-  const errorHandler = new ErrorHandler({
-    context: 'RoadmapGenerationAPI',
-    enableRetry: false
+  // Error handler for this route
+  const handleError = (error: Error) => ErrorHandler.handle(error, {
+    operation: 'roadmap_generation'
   });
 
   try {
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<GenerateR
     // Generate roadmap
     const roadmap = await roadmapService.generateRoadmap(
       runId,
-      clusters,
+      clusters as unknown as ClusterWithKeywords[],
       config,
       onProgress
     );
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<GenerateR
 
     // Handle export if requested
     let exportUrl: string | undefined;
-    if (options.exportFormat === 'csv') {
+    if ((options as any).exportFormat === 'csv') {
       const csvData = roadmapService.exportToCsv(roadmap);
       exportUrl = await storeCsvExport(runId, csvData);
     }
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<GenerateR
     });
 
     const responseData = {
-      roadmap: options.includeAnalytics ? roadmap : {
+      roadmap: (options as any).includeAnalytics ? roadmap : {
         ...roadmap,
         analytics: undefined // Strip analytics if not requested
       },
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<GenerateR
     });
 
   } catch (error) {
-    const handledError = errorHandler.handleError(error, 'generateRoadmap');
+    const handledError = handleError(error as Error);
     
     Sentry.captureException(handledError, {
       tags: {

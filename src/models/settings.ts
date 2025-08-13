@@ -199,8 +199,23 @@ export interface CreateSettingsInput {
 export interface UpdateSettingsInput {
   readonly ahrefsApiKey?: string | null;
   readonly anthropicApiKey?: string | null;
-  readonly defaultWeights?: Partial<ScoringWeights>;
-  readonly preferences?: Partial<UserPreferences>;
+  readonly defaultWeights?: {
+    readonly dream100?: Partial<StageWeights>;
+    readonly tier2?: Partial<StageWeights>;
+    readonly tier3?: Partial<StageWeights>;
+  };
+  readonly preferences?: {
+    readonly notifications?: {
+      readonly email?: Partial<NotificationSettings['email']>;
+      readonly inApp?: Partial<NotificationSettings['inApp']>;
+      readonly slack?: Partial<NotificationSettings['slack']>;
+    };
+    readonly interface?: Partial<InterfaceSettings>;
+    readonly defaults?: Partial<DefaultSettings>;
+    readonly integrations?: Partial<IntegrationSettings>;
+    readonly privacy?: Partial<PrivacySettings>;
+    readonly billing?: Partial<BillingSettings>;
+  };
 }
 
 /**

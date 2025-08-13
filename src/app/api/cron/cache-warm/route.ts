@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 
 // Cache warming service - warms frequently accessed data
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   // Verify this is a Vercel Cron request
-  const headersList = headers();
+  const headersList = await headers();
   const cronSecret = headersList.get('authorization');
   const userAgent = headersList.get('user-agent');
   

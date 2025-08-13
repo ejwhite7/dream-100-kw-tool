@@ -37,7 +37,7 @@ const ExportRequestSchema = ExportConfigSchema.extend({
   }).optional()
 });
 
-type ExportRequest = z.infer<typeof ExportRequestSchema>;
+// type ExportRequest = z.infer<typeof ExportRequestSchema>; // Currently unused
 
 interface ExportResponse {
   success: boolean;
@@ -80,7 +80,7 @@ interface ExportResponse {
   error?: {
     message: string;
     code: string;
-    details?: any;
+    details?: unknown;
     retryable?: boolean;
     suggestion?: string;
   };
@@ -100,7 +100,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportRes
     
     // Build export configuration for the comprehensive export service
     const exportConfig: ExportConfig = {
-      ...exportConfigData,
+      runId: exportConfigData.runId,
+      format: exportConfigData.format,
+      template: exportConfigData.template,
+      filters: exportConfigData.filters,
+      options: exportConfigData.options,
+      scheduling: exportConfigData.scheduling || null,
       destinations: deliveryOptions?.email ? [{
         type: 'email',
         config: {
@@ -261,7 +266,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const progressId = url.searchParams.get('progressId');
   if (progressId) {
     try {
-      const progress = exportService.getExportProgress(progressId as any);
+      const progress = exportService.getExportProgress(progressId);
       
       if (!progress) {
         return NextResponse.json({
@@ -287,7 +292,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         }
       });
 
-    } catch (error) {
+    } catch {
       return NextResponse.json({
         success: false,
         error: {

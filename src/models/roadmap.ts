@@ -589,7 +589,7 @@ export const generateContentCalendar = (
   const endDate = new Date(timeframe.endDate);
   
   const periods: CalendarPeriod[] = [];
-  let currentDate = new Date(startDate);
+  const currentDate = new Date(startDate);
   let periodId = 1;
   
   while (currentDate <= endDate) {

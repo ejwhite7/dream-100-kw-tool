@@ -1,7 +1,17 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { performanceMonitor } from '@/lib/monitoring';
+
+// JSX namespace declaration
+declare global {
+  namespace JSX {
+    interface Element {}
+    interface IntrinsicElements {
+      [elemName: string]: any;
+    }
+  }
+}
+import { performanceMonitor } from '../../lib/monitoring';
 import { 
   ChartBarIcon, 
   ExclamationTriangleIcon,

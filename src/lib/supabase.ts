@@ -95,7 +95,7 @@ export class DatabaseService {
 
   // Get user settings or create default ones
   static async getUserSettings(userId: string) {
-    let { data: settings, error } = await Tables.settings()
+    const { data: settings, error } = await Tables.settings()
       .select('*')
       .eq('user_id', userId)
       .single()

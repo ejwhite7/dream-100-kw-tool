@@ -527,6 +527,13 @@ export class CacheIntegrationManager {
   }
   
   /**
+   * Invalidate caches by tags
+   */
+  async invalidateByTags(tags: string[]): Promise<number> {
+    return this.cache.invalidateByTags(tags);
+  }
+  
+  /**
    * Invalidate all processing caches
    */
   async invalidateProcessing(): Promise<number> {

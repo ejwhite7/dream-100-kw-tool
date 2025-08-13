@@ -170,6 +170,10 @@ export class ErrorHandler {
     return apiError;
   }
   
+  static handleError(error: Error, context?: Record<string, any>): ApiError {
+    return ErrorHandler.handle(error, context);
+  }
+  
   static isRetryable(error: Error): boolean {
     if (error instanceof CustomApiError) {
       return error.retryable;

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 
 // Cleanup service - removes old data, expired cache entries, etc.
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   // Verify this is a Vercel Cron request
-  const headersList = headers();
+  const headersList = await headers();
   const cronSecret = headersList.get('authorization');
   const userAgent = headersList.get('user-agent');
   
@@ -188,10 +188,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     
     // Implement selective cleanup based on types array
     const results = {
-      requested: types,
-      cleaned: [],
-      skipped: [],
-      errors: [],
+      requested: types as string[],
+      cleaned: [] as string[],
+      skipped: [] as string[],
+      errors: [] as string[],
       dryRun
     };
     

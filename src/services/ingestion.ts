@@ -499,7 +499,7 @@ export class IngestionService {
       // Get current settings or create defaults
       const { data: currentSettings } = await DatabaseService.getUserSettings(userId);
       
-      let updateData: any = {};
+      const updateData: any = {};
 
       // Handle API key encryption
       if (input.ahrefsApiKey !== undefined) {
@@ -533,9 +533,17 @@ export class IngestionService {
       }
 
       if (input.preferences) {
+        const defaultPrefs = getDefaultUserPreferences();
         updateData.other_preferences = {
-          ...(currentSettings?.otherPreferences || getDefaultUserPreferences()),
-          ...input.preferences
+          ...defaultPrefs,
+          ...(currentSettings?.otherPreferences || {}),
+          ...input.preferences,
+          // Ensure notifications has required fields
+          notifications: {
+            ...defaultPrefs.notifications,
+            ...(currentSettings?.otherPreferences?.notifications || {}),
+            ...(input.preferences.notifications || {})
+          }
         };
       }
 

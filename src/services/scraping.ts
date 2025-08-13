@@ -735,7 +735,7 @@ export class CompetitorResearchService {
         const scrapedUrls: URLString[] = [];
         const errors: ScrapeError[] = [];
         
-        let totalLoadTime = 0;
+        const totalLoadTime = 0;
         
         for (const success of scrapeResult.successful) {
           const sanitized = ContentSanitizer.sanitizeContent(success);
@@ -1042,9 +1042,9 @@ export class CompetitorResearchService {
     crawlDelay: number
   ): Promise<ScrapingResult> {
     const batchSize = 10;
-    let allSuccessful: ScrapedContent[] = [];
-    let allFailed: { url: string; error: string; statusCode?: number; }[] = [];
-    let allRobotsBlocked: string[] = [];
+    const allSuccessful: ScrapedContent[] = [];
+    const allFailed: { url: string; error: string; statusCode?: number; }[] = [];
+    const allRobotsBlocked: string[] = [];
     
     for (let i = 0; i < urls.length; i += batchSize) {
       const batch = urls.slice(i, i + batchSize);

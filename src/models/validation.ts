@@ -761,7 +761,7 @@ const getConstraintFromError = (err: z.ZodIssue): string | null => {
 };
 
 const applyTransformations = (data: unknown, transformations: DataTransformation[]): unknown => {
-  let result = data;
+  const result = data;
   
   for (const transformation of transformations) {
     if (typeof result === 'object' && result !== null && transformation.field in result) {

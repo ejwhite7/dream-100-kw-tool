@@ -17,6 +17,8 @@ export * from './competitor';
 export * from './scoring';
 export * from './export';
 export * from './validation';
+export * from './settings';
+export * from './pipeline';
 
 // Explicit re-exports to avoid conflicts
 export type {

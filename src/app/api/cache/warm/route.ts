@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 /**
  * Get warming status and available strategies
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const cacheSystem = getCacheSystem();
     if (!cacheSystem) {

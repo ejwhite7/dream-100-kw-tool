@@ -499,7 +499,7 @@ export class ClusteringService {
     const similarities: SimilarityEntry[] = [];
     const n = embeddings.length;
     let processed = 0;
-    let totalComparisons = (n * (n - 1)) / 2;
+    const totalComparisons = (n * (n - 1)) / 2;
 
     // Use optimized batch processing for large matrices
     const batchSize = Math.min(this.batchConfig.similarityBatchSize, Math.ceil(Math.sqrt(n)));

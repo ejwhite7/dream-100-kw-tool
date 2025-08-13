@@ -148,7 +148,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportRes
     }
 
     // Apply sorting
-    const sortedItems = applySorting(filteredItems, options.sortBy || 'dueDate', options.sortDirection || 'asc');
+    const sortedItems = applySorting(filteredItems, (options as any).sortBy || 'dueDate', (options as any).sortDirection || 'asc');
 
     // Generate export data based on template
     const exportData = await generateExportData(
@@ -171,9 +171,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportRes
     );
 
     // Handle delivery options
-    if (deliveryOptions.email) {
+    if ((deliveryOptions as any).email) {
       await sendEmailExport(
-        deliveryOptions.email,
+        (deliveryOptions as any).email,
         filename,
         downloadUrl,
         {
@@ -205,7 +205,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ExportRes
       success: true,
       data: {
         exportId,
-        downloadUrl: deliveryOptions.downloadUrl !== false ? downloadUrl : undefined,
+        downloadUrl: (deliveryOptions as any)?.downloadUrl !== false ? downloadUrl : undefined,
         filename,
         format,
         recordCount: filteredItems.length,

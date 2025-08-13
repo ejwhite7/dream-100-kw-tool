@@ -4,7 +4,7 @@ import { getCacheSystem, ensureCacheSystem } from '../../../../lib/cache-init';
 /**
  * Cache status and health check endpoint
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Ensure cache system is initialized
     const cacheSystem = await ensureCacheSystem({

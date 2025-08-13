@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMonitoring, initializeMonitoring } from '@/lib/monitoring';
+import { getMonitoring, initializeMonitoring } from '../../../../lib/monitoring/index';
 import * as Sentry from '@sentry/nextjs';
 
 export async function POST(request: NextRequest) {
@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
         break;
         
       case 'slo':
-        data.slos = monitoring.sloManager.getSLOStatus(service);
+        data.slos = monitoring.sloManager.getSLOStatus(service || undefined);
         data.summary = monitoring.sloManager.getSLOSummary();
         break;
         

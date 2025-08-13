@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 
 // Health check cron - monitors system health and sends alerts
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   // Verify this is a Vercel Cron request
-  const headersList = headers();
+  const headersList = await headers();
   const cronSecret = headersList.get('authorization');
   const userAgent = headersList.get('user-agent');
   
@@ -27,10 +27,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const startTime = Date.now();
     const healthResults = {
-      services: {},
-      alerts: [],
-      metrics: {},
-      overallStatus: 'healthy'
+      services: {} as Record<string, unknown>,
+      alerts: [] as Array<{
+        service: string;
+        level: string;
+        message: string;
+        threshold?: number;
+        error?: string;
+      }>,
+      metrics: {} as Record<string, unknown>,
+      overallStatus: 'healthy' as string
     };
     
     // Comprehensive health checks
@@ -210,7 +216,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     await Promise.allSettled(healthChecks.map(check => check()));
     
     // Determine overall status
-    const serviceStatuses = Object.values(healthResults.services).map((service: any) => service.status);
+    const serviceStatuses = Object.values(healthResults.services).map((service: unknown) => {
+      return (service as { status?: string })?.status;
+    });
     const criticalAlerts = healthResults.alerts.filter(alert => alert.level === 'critical');
     const warningAlerts = healthResults.alerts.filter(alert => alert.level === 'warning');
     
@@ -273,7 +281,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // Helper function to send health alerts
-async function sendHealthAlerts(alerts: any[]): Promise<void> {
+async function sendHealthAlerts(alerts: Array<{
+  service: string;
+  level: string;
+  message: string;
+  threshold?: number;
+  error?: string;
+}>): Promise<void> {
   try {
     // Send Slack notifications if webhook is configured
     if (process.env.SLACK_WEBHOOK_URL) {

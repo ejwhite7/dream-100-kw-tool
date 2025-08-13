@@ -24,6 +24,18 @@ export class SentryReporter {
     }
   }
 
+  static captureApiMetrics(serviceName: string, metrics: any): void {
+    Sentry.addBreadcrumb({
+      message: `API metrics for ${serviceName}`,
+      level: 'info',
+      category: 'api-metrics',
+      data: {
+        serviceName,
+        ...metrics
+      }
+    });
+  }
+
   static captureBusinessMetrics(metrics: any): void {
     Sentry.addBreadcrumb({
       message: 'Business metrics update',

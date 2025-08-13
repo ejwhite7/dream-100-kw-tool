@@ -94,7 +94,7 @@ export class CachedAnthropicClient {
       // Check cache for all keywords
       const { cached, missing } = await anthropic.getCachedIntentClassifications(keywords);
       
-      let results: Array<{ keyword: string; intent: string; confidence: number }> = [];
+      const results: Array<{ keyword: string; intent: string; confidence: number }> = [];
       let fromCache = 0;
       let fromApi = 0;
       

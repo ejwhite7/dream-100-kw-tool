@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { Transform, Readable } from 'stream';
-// xlsx will be dynamically imported when needed to avoid test issues
+// exceljs will be dynamically imported when needed to avoid test issues
 import { 
   ExportConfig,
   ExportResult,
@@ -549,18 +549,47 @@ export class ExportService {
    * Private: Generate Excel content
    */
   private async generateExcel(data: any[], config: ExportConfig): Promise<Buffer> {
-    // Dynamically import xlsx to avoid test issues
-    const XLSX = await import('xlsx');
+    // Use secure exceljs library instead of vulnerable xlsx
+    const ExcelJS = await import('exceljs');
     
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(data);
-
-    // Add worksheet to workbook
+    const workbook = new ExcelJS.Workbook();
     const sheetName = config.template.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    const worksheet = workbook.addWorksheet(sheetName);
+
+    if (data.length > 0) {
+      // Add headers
+      const headers = Object.keys(data[0]);
+      worksheet.addRow(headers);
+      
+      // Style headers
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE6E6FA' }
+      };
+
+      // Add data rows
+      data.forEach(row => {
+        const values = headers.map(header => row[header]);
+        worksheet.addRow(values);
+      });
+
+      // Auto-fit columns
+      worksheet.columns.forEach(column => {
+        if (column.header) {
+          const maxLength = Math.max(
+            column.header.toString().length,
+            ...data.map(row => (row[column.header as string] || '').toString().length)
+          );
+          column.width = Math.min(Math.max(maxLength + 2, 10), 50);
+        }
+      });
+    }
 
     // Generate buffer
-    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    return await workbook.xlsx.writeBuffer() as Buffer;
   }
 
   /**

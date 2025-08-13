@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMonitoring, initializeMonitoring } from '@/lib/monitoring';
+import { getMonitoring, initializeMonitoring } from '../../../../lib/monitoring/index';
 import { AlertRule } from '@/lib/monitoring/types';
 import * as Sentry from '@sentry/nextjs';
 
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     
     // Filter by severity if specified
     if (severity) {
-      alerts = alerts.filter(alert => alert.severity === severity);
+      alerts = alerts.filter((alert: { severity?: string }) => alert.severity === severity);
     }
     
     // Get alert statistics

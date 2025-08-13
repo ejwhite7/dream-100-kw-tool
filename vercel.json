@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "name": "dream100-keyword-engine",
+  "name": "dream-100-kw-tool",
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
@@ -44,7 +44,7 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "https://dream100.ollisocial.com"
+          "value": "dream-100-kw-tool"
         },
         {
           "key": "Access-Control-Allow-Methods",

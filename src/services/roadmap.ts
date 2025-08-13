@@ -420,7 +420,7 @@ export class RoadmapGenerationService {
 
     for (const item of sortedItems) {
       // Find next available publishing date
-      let publishDate = this.findNextPublishingDate(
+      const publishDate = this.findNextPublishingDate(
         currentDate,
         endDate,
         publishingRules,
@@ -462,7 +462,7 @@ export class RoadmapGenerationService {
     calendar: Map<string, number>,
     lastPillarDate: Date | null
   ): Date | null {
-    let testDate = new Date(currentDate);
+    const testDate = new Date(currentDate);
     const maxIterations = 365; // Prevent infinite loop
     let iterations = 0;
 

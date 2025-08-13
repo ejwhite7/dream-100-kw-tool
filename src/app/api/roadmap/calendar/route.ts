@@ -54,14 +54,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<CalendarRe
     const { runId, view, ...filterParams } = validatedParams;
 
     // Build filters
-    const filters: CalendarFilters = {};
-    if (filterParams.dri) filters.dri = filterParams.dri;
-    if (filterParams.stage) filters.stage = filterParams.stage;
-    if (filterParams.intent) filters.intent = filterParams.intent;
-    if (filterParams.quickWinsOnly) filters.quickWinsOnly = filterParams.quickWinsOnly;
-    if (filterParams.minVolume) filters.minVolume = filterParams.minVolume;
-    if (filterParams.maxDifficulty) filters.maxDifficulty = filterParams.maxDifficulty;
-    if (filterParams.clusters) filters.clusters = filterParams.clusters as any[];
+    const filters: CalendarFilters = {
+      ...(filterParams.dri && { dri: filterParams.dri }),
+      ...(filterParams.stage && { stage: filterParams.stage }),
+      ...(filterParams.intent && { intent: filterParams.intent }),
+      ...(filterParams.quickWinsOnly && { quickWinsOnly: filterParams.quickWinsOnly }),
+      ...(filterParams.minVolume && { minVolume: filterParams.minVolume }),
+      ...(filterParams.maxDifficulty && { maxDifficulty: filterParams.maxDifficulty }),
+      ...(filterParams.clusters && { clusters: filterParams.clusters as any[] })
+    };
 
     // Initialize service
     const serviceConfig = {

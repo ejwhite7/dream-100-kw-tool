@@ -38,7 +38,7 @@ export class CachedAhrefsClient {
       // Check cache for all keywords
       const { cached, missing } = await this.cache.get(keywords, market);
       
-      let results: any[] = [];
+      const results: any[] = [];
       let fromCache = 0;
       let fromApi = 0;
       

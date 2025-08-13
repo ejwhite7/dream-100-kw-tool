@@ -58,7 +58,7 @@ export async function GET(
       }, { status: 400 });
     }
 
-    const progress = exportService.getExportProgress(exportId as any);
+    const progress = exportService.getExportProgress(exportId);
 
     if (!progress) {
       return NextResponse.json({
@@ -167,7 +167,7 @@ export async function GET(
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { exportId: string } }
-): Promise<NextResponse<{ success: boolean; data?: { cancelled: boolean }; error?: any }>> {
+): Promise<NextResponse<{ success: boolean; data?: { cancelled: boolean }; error?: { message: string; code: string } }>> {
   try {
     const { exportId } = params;
 
@@ -181,7 +181,7 @@ export async function DELETE(
       }, { status: 400 });
     }
 
-    const cancelled = await exportService.cancelExport(exportId as any);
+    const cancelled = await exportService.cancelExport(exportId);
 
     // Track cancellation attempt
     Sentry.addBreadcrumb({

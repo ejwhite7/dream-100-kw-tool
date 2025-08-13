@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { integrations } from '@/integrations';
-import { SentryReporter } from '@/utils/sentry';
+import { integrations } from '../../../../integrations';
+import { SentryReporter } from '../../../../utils/sentry';
 import * as Sentry from '@sentry/nextjs';
 
 export async function GET(request: NextRequest) {

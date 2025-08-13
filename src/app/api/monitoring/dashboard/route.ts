@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMonitoring, initializeMonitoring } from '@/lib/monitoring';
+import { getMonitoring, initializeMonitoring } from '../../../../lib/monitoring/index';
 import * as Sentry from '@sentry/nextjs';
 
 export async function GET(request: NextRequest) {
