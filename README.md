@@ -74,8 +74,8 @@ Open [http://localhost:3000](http://localhost:3000) to see the application.
 
 ### 3. **Universe Expansion**
 - Tier-2: 10 mid-tail keywords per Dream 100 term (1,000 total)
-- Tier-3: 10 long-tail keywords per tier-2 term (9,000 total)
-- Complete metrics enrichment for all 10,000 keywords
+- Tier-3: 10 long-tail keywords per tier-2 term (10,000 total)
+- Complete metrics enrichment for all 10,010 keywords
 - Advanced deduplication and canonicalization
 
 ### 4. **Semantic Clustering**
