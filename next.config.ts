@@ -2,18 +2,8 @@ import { withSentryConfig } from '@sentry/nextjs';
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    // Enable server components and other optimizations
-    serverComponentsExternalPackages: ['@anthropic-ai/sdk']
-  },
-  
-  // API route configuration
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb'
-    },
-    responseLimit: false
-  },
+  // Move serverComponentsExternalPackages to top level as serverExternalPackages
+  serverExternalPackages: ['@anthropic-ai/sdk'],
   
   // Headers for security and monitoring
   async headers() {

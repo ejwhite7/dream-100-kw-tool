@@ -447,6 +447,11 @@ export { AhrefsClient } from './ahrefs';
 export { AnthropicClient } from './anthropic';
 export { WebScraper } from './scraper';
 
+// Export new keyword provider clients
+export { MozClient, createMozClient, isMozConfigured } from './moz';
+export { SEMRushClient, createSEMRushClient, isSEMRushConfigured } from './semrush';
+export { KeywordProvider, getKeywordProvider, getAvailableProviders } from './keyword-provider';
+
 // Export types
 export * from '../types/ahrefs';
 export * from '../types/anthropic';
