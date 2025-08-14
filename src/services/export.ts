@@ -34,7 +34,7 @@ import type { RoadmapItemWithCluster } from '../models/roadmap';
 import type { KeywordWithCluster } from '../models/keyword';
 import type { ClusterWithKeywords } from '../models/cluster';
 import type { UUID } from '../models/index';
-import { handleError } from '../utils/error-handler';
+import { ErrorHandler } from '../utils/error-handler';
 import * as Sentry from '@sentry/nextjs';
 
 /**
@@ -589,7 +589,7 @@ export class ExportService {
     }
 
     // Generate buffer
-    return await workbook.xlsx.writeBuffer() as Buffer;
+    return await workbook.xlsx.writeBuffer() as any;
   }
 
   /**
@@ -622,7 +622,7 @@ export class ExportService {
   private transformToCompetitorInsightsCSV(data: any[], options: ExportOptions): CompetitorInsightsCSV[] {
     // Mock implementation - would integrate with actual competitor data
     return data.map((item, index) => ({
-      domain: `competitor${index % 5 + 1}.com`,
+      domain: `competitor${index % 5 + 1}.com` as any,
       discovery_keyword: item.keyword || item.primaryKeyword,
       total_titles: Math.floor(Math.random() * 100) + 10,
       unique_titles: Math.floor(Math.random() * 80) + 5,
@@ -847,26 +847,70 @@ export class ExportService {
    */
   private initializeTemplateConfigs(): void {
     this.templateConfigs.set('writers', {
-      includeFields: ['primary_keyword', 'suggested_title', 'content_type', 'due_date', 'estimated_hours', 'notes', 'priority'],
-      sortBy: 'due_date',
-      groupBy: 'dri',
-      filters: {
-        keywords: {},
-        roadmap: { includeNotes: true },
-        clusters: {}
+      writers: {
+        includeFields: ['primary_keyword', 'suggested_title', 'content_type', 'due_date', 'estimated_hours', 'notes', 'priority'],
+        sortBy: 'due_date',
+        groupBy: 'dri',
+        filters: {
+          keywords: {},
+          roadmap: { includeNotes: true },
+          clusters: {}
+        }
+      },
+      seoOps: {
+        includeFields: ['keyword', 'volume', 'difficulty', 'blended_score', 'quick_win', 'cluster_label', 'competition_level', 'serp_features'],
+        includeMetrics: true,
+        includeTechnicalData: true
+      },
+      stakeholders: {
+        includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
+        summaryLevel: 'high',
+        includeAnalytics: true
       }
     });
 
     this.templateConfigs.set('seo_ops', {
-      includeFields: ['keyword', 'volume', 'difficulty', 'blended_score', 'quick_win', 'cluster_label', 'competition_level', 'serp_features'],
-      includeMetrics: true,
-      includeTechnicalData: true
+      writers: {
+        includeFields: ['keyword', 'volume', 'difficulty', 'blended_score', 'quick_win', 'cluster_label', 'competition_level', 'serp_features'],
+        sortBy: 'volume',
+        filters: {
+          keywords: {},
+          roadmap: {},
+          clusters: {}
+        }
+      },
+      seoOps: {
+        includeFields: ['keyword', 'volume', 'difficulty', 'blended_score', 'quick_win', 'cluster_label', 'competition_level', 'serp_features'],
+        includeMetrics: true,
+        includeTechnicalData: true
+      },
+      stakeholders: {
+        includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
+        summaryLevel: 'detailed',
+        includeAnalytics: false
+      }
     });
 
     this.templateConfigs.set('stakeholders', {
-      includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
-      summaryLevel: 'high',
-      includeAnalytics: true
+      writers: {
+        includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
+        sortBy: 'priority',
+        filters: {
+          keywords: {},
+          roadmap: {},
+          clusters: {}
+        }
+      },
+      seoOps: {
+        includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
+        includeMetrics: false,
+        includeTechnicalData: false
+      },
+      stakeholders: {
+        includeFields: ['cluster_label', 'primary_keyword', 'volume', 'estimated_traffic', 'priority', 'due_date', 'dri'],
+        summaryLevel: 'high',
+        includeAnalytics: true
+      }
     });
   }
 
@@ -881,10 +925,10 @@ export class ExportService {
 
   private buildTemplateFilters(template: string): ExportFilters {
     const templateConfig = this.templateConfigs.get(template);
-    return templateConfig?.filters || {
-      keywords: {},
-      roadmap: {},
-      clusters: {}
+    return {
+      keywords: templateConfig?.writers?.filters?.keywords || {},
+      roadmap: templateConfig?.writers?.filters?.roadmap || {},
+      clusters: templateConfig?.writers?.filters?.clusters || {}
     };
   }
 
@@ -893,8 +937,8 @@ export class ExportService {
     
     return {
       includeMetadata: true,
-      includeAnalytics: templateConfig?.includeAnalytics || false,
-      sortBy: templateConfig?.sortBy as any || 'score',
+      includeAnalytics: templateConfig?.stakeholders?.includeAnalytics || false,
+      sortBy: templateConfig?.writers?.sortBy as any || 'score',
       sortDirection: 'desc',
       formatting: {
         dateFormat: 'US',

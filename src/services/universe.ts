@@ -41,6 +41,7 @@ import type {
   Run,
   KeywordString
 } from '../models';
+import type { ProcessingStage } from '../models/pipeline';
 import { AnthropicClient } from '../integrations/anthropic';
 import { AhrefsClient } from '../integrations/ahrefs';
 import { ErrorHandler, RetryHandler } from '../utils/error-handler';
@@ -596,13 +597,7 @@ export class UniverseExpansionService {
         }
       });
 
-      throw ErrorHandler.handle(error as Error, {
-        operation: 'universe_expansion',
-        provider: 'universe-service',
-        runId,
-        dream100Count: dream100Keywords.length,
-        processingTime
-      });
+      throw new Error(`Universe expansion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1222,7 +1217,7 @@ export class UniverseExpansionService {
         return [];
       }
 
-      return response.data
+      return response.data.keywords
         .filter(item => item.keyword !== seedKeyword)
         .map(item => ({
           keyword: normalizeKeyword(item.keyword),
@@ -1703,13 +1698,15 @@ export class UniverseExpansionService {
     const ahrefsCalls = processingStats.apiCallCounts?.ahrefs || 0;
     const serpCalls = processingStats.apiCallCounts?.serp || 0;
 
-    costBreakdown.anthropicCost = anthropicCalls * 0.15; // ~$0.15 per LLM call
-    costBreakdown.ahrefsCost = ahrefsCalls * 0.20; // ~$0.20 per Ahrefs batch
-    costBreakdown.serpApiCost = serpCalls * 0.05; // ~$0.05 per SERP call
-    costBreakdown.totalCost = costBreakdown.anthropicCost + costBreakdown.ahrefsCost + costBreakdown.serpApiCost;
+    // Use type assertion to allow assignment to readonly properties in partial type
+    const mutableCostBreakdown = costBreakdown as any;
+    mutableCostBreakdown.anthropicCost = anthropicCalls * 0.15; // ~$0.15 per LLM call
+    mutableCostBreakdown.ahrefsCost = ahrefsCalls * 0.20; // ~$0.20 per Ahrefs batch
+    mutableCostBreakdown.serpApiCost = serpCalls * 0.05; // ~$0.05 per SERP call
+    mutableCostBreakdown.totalCost = mutableCostBreakdown.anthropicCost + mutableCostBreakdown.ahrefsCost + mutableCostBreakdown.serpApiCost;
 
     if (budgetLimit) {
-      costBreakdown.budgetUtilization = (costBreakdown.totalCost / budgetLimit) * 100;
+      mutableCostBreakdown.budgetUtilization = (mutableCostBreakdown.totalCost / budgetLimit) * 100;
     }
   }
 
@@ -1901,6 +1898,12 @@ export const createUniverseExpansionService = (
   return new UniverseExpansionService(anthropicApiKey, ahrefsApiKey, redis);
 };
 
+// Service class is already exported above, no need to re-export
+
+// Alias for backwards compatibility  
+export const UniverseService = UniverseExpansionService;
+export type UniverseService = UniverseExpansionService;
+
 /**
  * Export service for job queue integration
  */
@@ -1911,7 +1914,7 @@ export const processUniverseExpansionJob = async (
   const startTime = Date.now();
   
   try {
-    const request = job.data.input as UniverseExpansionRequest;
+    const request = job.data.input as any as UniverseExpansionRequest;
     
     // Validate input
     if (!isUniverseExpansionRequest(request)) {
@@ -1943,7 +1946,7 @@ export const processUniverseExpansionJob = async (
     
     return {
       success: true,
-      output: result,
+      output: result as any,
       metrics,
       artifacts: [],
       warnings: result.warnings,

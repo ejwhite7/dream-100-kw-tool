@@ -19,9 +19,23 @@
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
 import { addDays, format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
-import type { UUID, Cluster, RoadmapItem, JobProgress } from '../models';
+import type { UUID, Cluster, RoadmapItem } from '../models';
 import type { KeywordStage, KeywordIntent, RoadmapStage } from '../types/database';
 import { RoadmapService } from '../services/roadmap';
+
+/**
+ * Worker-specific job progress interface
+ */
+interface WorkerJobProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, any>;
+}
 import { supabase } from '../lib/supabase';
 
 /**
@@ -87,7 +101,9 @@ export async function processRoadmapJob(
   
   try {
     // Initialize roadmap service
-    const roadmapService = new RoadmapService();
+    const roadmapService = new RoadmapService(
+      process.env.ANTHROPIC_API_KEY || ''
+    );
     
     // Calculate planning parameters
     const startDate = settings.startDate ? parseISO(settings.startDate) : new Date();
@@ -111,7 +127,7 @@ export async function processRoadmapJob(
         startDate: format(startDate, 'yyyy-MM-dd'),
         endDate: format(endDate, 'yyyy-MM-dd'),
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run status
     await supabase
@@ -131,10 +147,9 @@ export async function processRoadmapJob(
     let currentStep = 0;
     const totalSteps = 5; // Content strategy, Calendar planning, Team assignment, Post generation, Quality validation
     
-    const result = await roadmapService.generateRoadmap({
-      clusters,
-      runId,
-      settings: {
+    const result = await roadmapService.generateRoadmap(
+      clusters as any,
+      {
         startDate,
         endDate,
         postsPerMonth,
@@ -144,14 +159,15 @@ export async function processRoadmapJob(
         enableSeasonality: settings.enableSeasonality ?? false,
         workloadDistribution: settings.workloadDistribution || 'equal',
       },
-      onProgress: async (progress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + (progress.percentage / totalSteps);
+      async (progress: any) => {
+        const progressPercent = ((progress.completedSteps || 0) / (progress.totalSteps || 1)) * 100;
+        const overallProgress = (currentStep / totalSteps) * 100 + (progressPercent / totalSteps);
         
         await job.updateProgress({
           stage: 'roadmap',
-          stepName: progress.stepName,
-          current: progress.current,
-          total: progress.total,
+          stepName: progress.currentStep || '',
+          current: progress.completedSteps || 0,
+          total: progress.totalSteps || 0,
           percentage: Math.min(overallProgress, 100),
           message: progress.message,
           estimatedTimeRemaining: progress.estimatedTimeRemaining,
@@ -159,10 +175,10 @@ export async function processRoadmapJob(
             currentStep: currentStep + 1,
             totalSteps,
             clusterCount: clusters.length,
-            postsGenerated: progress.current,
+            postsGenerated: progress.completedSteps || 0,
             runId,
           },
-        } satisfies JobProgress);
+        } satisfies WorkerJobProgress);
         
         // Update database progress
         await supabase
@@ -173,31 +189,25 @@ export async function processRoadmapJob(
               stages_completed: ['expansion', 'universe', 'clustering', 'scoring'],
               clusters_created: clusters.length,
               percent_complete: 95 + Math.min(overallProgress * 0.05, 5), // Roadmap is final 5% of pipeline
-              estimated_time_remaining: progress.estimatedTimeRemaining,
+              estimated_time_remaining: 0,
             },
           })
           .eq('id', runId);
-      },
-      onStepComplete: async (stepName: string) => {
-        currentStep++;
-        console.log(`Roadmap step '${stepName}' completed (${currentStep}/${totalSteps})`);
-      },
-      onPostCreated: async (post: RoadmapItem) => {
-        console.log(`Created post: ${post.suggestedTitle} (${post.primaryKeyword})`);
-      },
-    });
+      }
+    );
 
     // Calculate comprehensive metrics
-    const calendarData = calculateCalendarData(result.roadmapItems, teamMembers);
-    const metrics = calculateRoadmapMetrics(result.roadmapItems, clusters, startTime);
-    const qualityMetrics = calculateRoadmapQualityMetrics(result.roadmapItems, clusters);
+    const roadmapItems = result.items || [];
+    const calendarData = calculateCalendarData(roadmapItems, teamMembers);
+    const metrics = calculateRoadmapMetrics(roadmapItems, clusters, startTime);
+    const qualityMetrics = calculateRoadmapQualityMetrics(roadmapItems, clusters);
     
     // Bulk insert roadmap items to database
-    if (result.roadmapItems.length > 0) {
+    if (roadmapItems.length > 0) {
       await supabase
         .from('roadmap_items')
         .insert(
-          result.roadmapItems.map(item => ({
+          roadmapItems.map((item: RoadmapItem) => ({
             id: item.id,
             run_id: runId,
             cluster_id: item.clusterId,
@@ -223,18 +233,18 @@ export async function processRoadmapJob(
     await job.updateProgress({
       stage: 'roadmap',
       stepName: 'Completed',
-      current: result.roadmapItems.length,
-      total: result.roadmapItems.length,
+      current: roadmapItems.length,
+      total: roadmapItems.length,
       percentage: 100,
-      message: `Editorial roadmap completed with ${result.roadmapItems.length} posts`,
+      message: `Editorial roadmap completed with ${roadmapItems.length} posts`,
       metadata: {
-        postsGenerated: result.roadmapItems.length,
-        quickWinPosts: result.roadmapItems.filter(p => p.quickWin).length,
+        postsGenerated: roadmapItems.length,
+        quickWinPosts: roadmapItems.filter((p: RoadmapItem) => p.quickWin).length,
         monthlyBreakdown: calendarData.monthlyBreakdown,
         teamAssignments: calendarData.teamAssignments,
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run with completed roadmap stage
     await supabase
@@ -253,7 +263,7 @@ export async function processRoadmapJob(
       .eq('id', runId);
 
     const totalProcessingTime = Date.now() - startTime;
-    console.log(`Roadmap job ${job.id} completed in ${totalProcessingTime}ms with ${result.roadmapItems.length} posts`);
+    console.log(`Roadmap job ${job.id} completed in ${totalProcessingTime}ms with ${roadmapItems.length} posts`);
 
     // Log success to Sentry
     Sentry.addBreadcrumb({
@@ -264,13 +274,13 @@ export async function processRoadmapJob(
         jobId: job.id,
         runId,
         clusterCount: clusters.length,
-        postsGenerated: result.roadmapItems.length,
+        postsGenerated: roadmapItems.length,
         processingTime: totalProcessingTime,
       },
     });
 
     return {
-      roadmapItems: result.roadmapItems,
+      roadmapItems: roadmapItems,
       calendarData,
       metrics: {
         ...metrics,
@@ -460,13 +470,14 @@ function calculateRoadmapQualityMetrics(
       }, {} as Record<string, number>)
   );
   
+  let workloadBalance: number;
   if (teamAssignments.length <= 1) {
     // Only one team member, perfect balance by definition
-    const workloadBalance = 1;
+    workloadBalance = 1;
   } else {
     const avgAssignments = teamAssignments.reduce((sum, count) => sum + count, 0) / teamAssignments.length;
     const assignmentVariance = teamAssignments.reduce((sum, count) => sum + Math.pow(count - avgAssignments, 2), 0) / teamAssignments.length;
-    const workloadBalance = Math.max(0, 1 - (assignmentVariance / avgAssignments));
+    workloadBalance = Math.max(0, 1 - (assignmentVariance / avgAssignments));
   }
 
   // Keyword coverage

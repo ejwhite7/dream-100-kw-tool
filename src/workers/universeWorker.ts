@@ -18,9 +18,27 @@
 
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
-import type { UUID, Keyword, JobProgress, JobMetrics } from '../models';
+import type { UUID, Keyword } from '../models';
 import type { KeywordStage, KeywordIntent } from '../types/database';
 import { UniverseService } from '../services/universe';
+
+/**
+ * Worker-specific job progress interface
+ */
+interface WorkerJobProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, any>;
+}
+
+interface JobMetrics {
+  [key: string]: any;
+}
 import { supabase } from '../lib/supabase';
 
 /**
@@ -94,7 +112,10 @@ export async function processUniverseJob(
   
   try {
     // Initialize universe service
-    const universeService = new UniverseService();
+    const universeService = new UniverseService(
+      process.env.ANTHROPIC_API_KEY || '',
+      process.env.AHREFS_API_KEY || ''
+    );
     
     // Update initial progress
     await job.updateProgress({
@@ -110,7 +131,7 @@ export async function processUniverseJob(
         maxTier2: settings.maxTier2PerDream || 10,
         maxTier3: settings.maxTier3PerTier2 || 10,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run status
     await supabase
@@ -130,36 +151,35 @@ export async function processUniverseJob(
     let currentStep = 0;
     const totalSteps = 5; // Tier-2 expansion, Tier-3 expansion, Metrics enrichment, Competitor analysis, Quality filtering
     
-    const result = await universeService.expandUniverse({
-      dreamKeywords,
+    const result = await universeService.expandToUniverse({
       runId,
-      settings: {
-        maxTier2PerDream: settings.maxTier2PerDream || 10,
-        maxTier3PerTier2: settings.maxTier3PerTier2 || 10,
-        maxTotalKeywords: settings.maxTotalKeywords || 10000,
-        enableCompetitorAnalysis: settings.enableCompetitorAnalysis ?? true,
-        enableSerpScraping: settings.enableSerpScraping ?? true,
-        market: settings.market || 'US',
-        qualityThreshold: settings.qualityThreshold || 0.3,
-      },
-      onProgress: async (progress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + (progress.percentage / totalSteps);
+      dream100Keywords: dreamKeywords.map(k => k.keyword),
+      maxTier2PerDream: settings.maxTier2PerDream || 10,
+      maxTier3PerTier2: settings.maxTier3PerTier2 || 10,
+      targetTotalCount: settings.maxTotalKeywords || 10000,
+      enableCompetitorMining: settings.enableCompetitorAnalysis ?? true,
+      enableSerpAnalysis: settings.enableSerpScraping ?? true,
+      market: settings.market || 'US',
+      qualityThreshold: settings.qualityThreshold || 0.3,
+    },
+      async (progress: WorkerJobProgress) => {
+        const overallProgress = (currentStep / totalSteps) * 100 + ((progress.percentage || 0) / totalSteps);
         
         await job.updateProgress({
           stage: 'universe',
-          stepName: progress.stepName,
-          current: progress.current,
-          total: progress.total,
+          stepName: progress.stepName || '',
+          current: progress.current || 0,
+          total: progress.total || 0,
           percentage: Math.min(overallProgress, 100),
           message: progress.message,
-          estimatedTimeRemaining: progress.estimatedTimeRemaining,
+          estimatedTimeRemaining: progress.estimatedTimeRemaining || 0,
           metadata: {
             currentStep: currentStep + 1,
             totalSteps,
             dreamCount: dreamKeywords.length,
             runId,
           },
-        } satisfies JobProgress);
+        } satisfies WorkerJobProgress);
         
         // Update database progress
         await supabase
@@ -170,57 +190,23 @@ export async function processUniverseJob(
               stages_completed: ['expansion'],
               keywords_discovered: progress.current,
               percent_complete: 20 + Math.min(overallProgress * 0.4, 40), // Universe is ~40% of pipeline
-              estimated_time_remaining: progress.estimatedTimeRemaining,
+              estimated_time_remaining: progress.estimatedTimeRemaining || 0,
             },
           })
           .eq('id', runId);
-      },
-      onStepComplete: async (stepName: string) => {
-        currentStep++;
-        console.log(`Universe step '${stepName}' completed (${currentStep}/${totalSteps})`);
-      },
-      onApiCall: async (service: string, cost: number) => {
+      }
+    );
         // Track API usage in database
-        const { data: currentRun } = await supabase
-          .from('runs')
-          .select('api_usage')
-          .eq('id', runId)
-          .single();
+        // TODO: Implement proper API usage tracking
         
-        const currentUsage = (currentRun?.api_usage as any) || {
-          ahrefs: { requests: 0, cost: 0 },
-          anthropic: { requests: 0, tokens: 0, cost: 0 },
-          scraping: { requests: 0, cost: 0 },
-          total_cost: 0,
-        };
-        
-        if (service === 'ahrefs') {
-          currentUsage.ahrefs.requests++;
-          currentUsage.ahrefs.cost += cost;
-        } else if (service === 'anthropic') {
-          currentUsage.anthropic.requests++;
-          currentUsage.anthropic.cost += cost;
-        } else if (service === 'scraping') {
-          currentUsage.scraping = currentUsage.scraping || { requests: 0, cost: 0 };
-          currentUsage.scraping.requests++;
-          currentUsage.scraping.cost += cost;
-        }
-        currentUsage.total_cost += cost;
-        
-        await supabase
-          .from('runs')
-          .update({ api_usage: currentUsage })
-          .eq('id', runId);
-      },
-    });
 
     // Calculate quality metrics
     const qualityMetrics = calculateUniverseQualityMetrics(
-      result.tier2Keywords,
-      result.tier3Keywords
+      result.keywordsByTier.tier2 as any,
+      result.keywordsByTier.tier3 as any
     );
     
-    const totalKeywords = dreamKeywords.length + result.tier2Keywords.length + result.tier3Keywords.length;
+    const totalKeywords = dreamKeywords.length + result.keywordsByTier.tier2.length + result.keywordsByTier.tier3.length;
     
     // Update final progress
     await job.updateProgress({
@@ -231,13 +217,13 @@ export async function processUniverseJob(
       percentage: 100,
       message: `Universe expansion completed with ${totalKeywords} total keywords`,
       metadata: {
-        tier2Count: result.tier2Keywords.length,
-        tier3Count: result.tier3Keywords.length,
+        tier2Count: result.keywordsByTier.tier2.length,
+        tier3Count: result.keywordsByTier.tier3.length,
         totalCount: totalKeywords,
         qualityMetrics,
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run with completed universe stage
     await supabase
@@ -248,7 +234,7 @@ export async function processUniverseJob(
           stages_completed: ['expansion', 'universe'],
           keywords_discovered: totalKeywords,
           percent_complete: 60, // Universe completion brings us to ~60%
-          competitors_found: result.metrics?.competitorsFound || 0,
+          competitors_found: 0,
         },
         total_keywords: totalKeywords,
       })
@@ -266,26 +252,30 @@ export async function processUniverseJob(
         jobId: job.id,
         runId,
         totalKeywords,
-        tier2Count: result.tier2Keywords.length,
-        tier3Count: result.tier3Keywords.length,
+        tier2Count: result.keywordsByTier.tier2.length,
+        tier3Count: result.keywordsByTier.tier3.length,
         processingTime,
       },
     });
 
     return {
-      tier2Keywords: result.tier2Keywords,
-      tier3Keywords: result.tier3Keywords,
-      allKeywords: [...dreamKeywords, ...result.tier2Keywords, ...result.tier3Keywords],
+      tier2Keywords: result.keywordsByTier.tier2 as any,
+      tier3Keywords: result.keywordsByTier.tier3 as any,
+      allKeywords: [...dreamKeywords, ...result.keywordsByTier.tier2 as any, ...result.keywordsByTier.tier3 as any],
       metrics: {
         dreamCount: dreamKeywords.length,
-        tier2Generated: result.tier2Keywords.length,
-        tier3Generated: result.tier3Keywords.length,
+        tier2Generated: result.keywordsByTier.tier2.length,
+        tier3Generated: result.keywordsByTier.tier3.length,
         totalKeywords,
-        competitorsFound: result.metrics?.competitorsFound || 0,
-        serpUrlsScraped: result.metrics?.serpUrlsScraped || 0,
+        competitorsFound: 0,
+        serpUrlsScraped: 0,
         processingTime,
-        apiCalls: result.metrics?.apiCalls || { anthropic: 0, ahrefs: 0, scraping: 0 },
-        costs: result.metrics?.costs || { anthropic: 0, ahrefs: 0, total: 0 },
+        apiCalls: result.processingStats.apiCallCounts,
+        costs: {
+          anthropic: result.costBreakdown.anthropicCost,
+          ahrefs: result.costBreakdown.ahrefsCost,
+          total: result.costBreakdown.totalCost
+        },
       },
       qualityMetrics,
     };

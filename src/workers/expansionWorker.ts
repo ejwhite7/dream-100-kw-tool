@@ -18,9 +18,27 @@
 
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
-import type { UUID, Keyword, JobProgress, JobMetrics } from '../models';
+import type { UUID, Keyword } from '../models';
 import type { KeywordStage, KeywordIntent } from '../types/database';
 import { ExpansionService } from '../services/expansion';
+
+/**
+ * Worker-specific job progress interface
+ */
+interface WorkerJobProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, any>;
+}
+
+interface JobMetrics {
+  [key: string]: any;
+}
 import { supabase } from '../lib/supabase';
 
 /**
@@ -81,7 +99,10 @@ export async function processExpansionJob(
   
   try {
     // Initialize expansion service
-    const expansionService = new ExpansionService();
+    const expansionService = new ExpansionService(
+      process.env.ANTHROPIC_API_KEY || '',
+      process.env.AHREFS_API_KEY || ''
+    );
     
     // Update initial progress
     await job.updateProgress({
@@ -95,7 +116,7 @@ export async function processExpansionJob(
         seedCount: seedKeywords.length,
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run status to processing
     await supabase
@@ -117,25 +138,23 @@ export async function processExpansionJob(
     const totalSteps = 6; // LLM expansion, Ahrefs enrichment, Intent classification, Relevance scoring, Quality filtering, Final selection
     
     const result = await expansionService.expandToDream100({
-      seedKeywords,
       runId,
-      settings: {
-        maxKeywords: settings.maxDream100 || 100,
-        market: settings.market || 'US',
-        enableQualityFiltering: settings.enableQualityFiltering ?? true,
-        commercialFocus: settings.commercialFocus ?? true,
-        scoringWeights: settings.scoringWeights,
-      },
-      onProgress: async (progress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + (progress.percentage / totalSteps);
+      seedKeywords,
+      targetCount: settings.maxDream100 || 100,
+      market: settings.market || 'US',
+      qualityThreshold: 0.7,
+      includeCompetitorAnalysis: settings.commercialFocus || false
+    },
+      async (progress: any) => {
+        const overallProgress = progress.progressPercent;
         
         await job.updateProgress({
           stage: 'expansion',
-          stepName: progress.stepName,
-          current: progress.current,
-          total: progress.total,
+          stepName: progress.currentStep,
+          current: progress.keywordsProcessed,
+          total: settings.maxDream100 || 100,
           percentage: Math.min(overallProgress, 100),
-          message: progress.message,
+          message: progress.currentStep,
           estimatedTimeRemaining: progress.estimatedTimeRemaining,
           metadata: {
             currentStep: currentStep + 1,
@@ -143,7 +162,7 @@ export async function processExpansionJob(
             seedCount: seedKeywords.length,
             runId,
           },
-        } satisfies JobProgress);
+        } satisfies WorkerJobProgress);
         
         // Update database progress
         await supabase
@@ -152,64 +171,38 @@ export async function processExpansionJob(
             progress: {
               current_stage: 'expansion',
               stages_completed: [],
-              keywords_discovered: progress.current,
+              keywords_discovered: progress.keywordsProcessed,
               percent_complete: Math.min(overallProgress, 100),
               estimated_time_remaining: progress.estimatedTimeRemaining,
             },
           })
           .eq('id', runId);
-      },
-      onStepComplete: async (stepName: string) => {
-        currentStep++;
-        console.log(`Expansion step '${stepName}' completed (${currentStep}/${totalSteps})`);
-      },
-      onApiCall: async (service: string, cost: number) => {
-        // Track API usage in database
-        const { data: currentRun } = await supabase
-          .from('runs')
-          .select('api_usage')
-          .eq('id', runId)
-          .single();
         
-        const currentUsage = (currentRun?.api_usage as any) || {
-          ahrefs: { requests: 0, cost: 0 },
-          anthropic: { requests: 0, tokens: 0, cost: 0 },
-          total_cost: 0,
-        };
-        
-        if (service === 'ahrefs') {
-          currentUsage.ahrefs.requests++;
-          currentUsage.ahrefs.cost += cost;
-        } else if (service === 'anthropic') {
-          currentUsage.anthropic.requests++;
-          currentUsage.anthropic.cost += cost;
+        // Handle step completion logic
+        if (progress.stage === 'final_selection') {
+          currentStep++;
+          console.log(`Expansion step '${progress.currentStep}' completed (${currentStep}/${totalSteps})`);
         }
-        currentUsage.total_cost += cost;
-        
-        await supabase
-          .from('runs')
-          .update({ api_usage: currentUsage })
-          .eq('id', runId);
-      },
-    });
+      }
+    );
 
     // Calculate quality metrics
-    const qualityMetrics = calculateQualityMetrics(result.keywords);
+    const qualityMetrics = calculateQualityMetrics(result.dream100Keywords as any as Keyword[]);
     
     // Update final progress
     await job.updateProgress({
       stage: 'expansion',
       stepName: 'Completed',
-      current: result.keywords.length,
-      total: result.keywords.length,
+      current: result.dream100Keywords.length,
+      total: result.dream100Keywords.length,
       percentage: 100,
-      message: `Dream 100 expansion completed with ${result.keywords.length} keywords`,
+      message: `Dream 100 expansion completed with ${result.dream100Keywords.length} keywords`,
       metadata: {
-        finalCount: result.keywords.length,
+        finalCount: result.dream100Keywords.length,
         qualityMetrics,
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run with completed expansion stage
     await supabase
@@ -218,15 +211,15 @@ export async function processExpansionJob(
         progress: {
           current_stage: 'expansion',
           stages_completed: ['expansion'],
-          keywords_discovered: result.keywords.length,
+          keywords_discovered: result.dream100Keywords.length,
           percent_complete: 20, // Expansion is ~20% of total pipeline
         },
-        total_keywords: result.keywords.length,
+        total_keywords: result.dream100Keywords.length,
       })
       .eq('id', runId);
 
     const processingTime = Date.now() - startTime;
-    console.log(`Expansion job ${job.id} completed in ${processingTime}ms with ${result.keywords.length} keywords`);
+    console.log(`Expansion job ${job.id} completed in ${processingTime}ms with ${result.dream100Keywords.length} keywords`);
 
     // Log success to Sentry
     Sentry.addBreadcrumb({
@@ -236,21 +229,25 @@ export async function processExpansionJob(
       data: {
         jobId: job.id,
         runId,
-        keywordCount: result.keywords.length,
+        keywordCount: result.dream100Keywords.length,
         processingTime,
       },
     });
 
     return {
-      dreamKeywords: result.keywords,
+      dreamKeywords: result.dream100Keywords as any as Keyword[],
       metrics: {
         seedCount: seedKeywords.length,
-        candidatesGenerated: result.metrics?.candidatesGenerated || 0,
-        candidatesFiltered: result.metrics?.candidatesFiltered || 0,
-        finalCount: result.keywords.length,
+        candidatesGenerated: result.totalCandidatesGenerated || 0,
+        candidatesFiltered: 0,
+        finalCount: result.dream100Keywords.length,
         processingTime,
-        apiCalls: result.metrics?.apiCalls || { anthropic: 0, ahrefs: 0 },
-        costs: result.metrics?.costs || { anthropic: 0, ahrefs: 0, total: 0 },
+        apiCalls: result.processingStats?.apiCallCounts || { anthropic: 0, ahrefs: 0 },
+        costs: {
+          anthropic: result.costBreakdown?.anthropicCost || 0,
+          ahrefs: result.costBreakdown?.ahrefsCost || 0,
+          total: result.costBreakdown?.totalCost || 0
+        },
       },
       qualityMetrics,
     };

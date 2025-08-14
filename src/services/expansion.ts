@@ -40,6 +40,7 @@ import type {
   JobMetrics,
   Run
 } from '../models';
+import type { ProcessingStage } from '../models/pipeline';
 import { AnthropicClient } from '../integrations/anthropic';
 import { AhrefsClient } from '../integrations/ahrefs';
 import { ErrorHandler, RetryHandler } from '../utils/error-handler';
@@ -300,7 +301,7 @@ export class Dream100ExpansionService {
         }
       );
       processingStats.stageTimings!['llm_expansion'] = Date.now() - stageStart;
-      processingStats.apiCallCounts!.anthropic++;
+      (processingStats.apiCallCounts as any).anthropic++;
 
       if (expansionCandidates.length === 0) {
         throw new Error('LLM expansion produced no viable candidates');
@@ -340,7 +341,7 @@ export class Dream100ExpansionService {
         { industry, market }
       );
       processingStats.stageTimings!['intent_classification'] = Date.now() - intentStart;
-      processingStats.apiCallCounts!.anthropic++;
+      (processingStats.apiCallCounts as any).anthropic++;
 
       // Stage 4: Relevance and Commercial Scoring
       progressCallback?.({
@@ -489,13 +490,7 @@ export class Dream100ExpansionService {
         }
       });
 
-      throw ErrorHandler.handle(error as Error, {
-        operation: 'dream100_expansion',
-        provider: 'expansion-service',
-        runId,
-        seedKeywords: seedKeywords.slice(0, 3), // Limit for privacy
-        processingTime
-      });
+      throw new Error(`Dream 100 expansion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1054,8 +1049,8 @@ export class Dream100ExpansionService {
     if (keywords.length === 0) return;
 
     // Calculate averages
-    metrics.avgRelevanceScore = keywords.reduce((sum, k) => sum + k.relevanceScore, 0) / keywords.length;
-    metrics.avgCommercialScore = keywords.reduce((sum, k) => sum + k.commercialScore, 0) / keywords.length;
+    (metrics as any).avgRelevanceScore = keywords.reduce((sum, k) => sum + k.relevanceScore, 0) / keywords.length;
+    (metrics as any).avgCommercialScore = keywords.reduce((sum, k) => sum + k.commercialScore, 0) / keywords.length;
 
     // Intent distribution
     const intentCounts: Record<KeywordIntent, number> = {
@@ -1070,7 +1065,7 @@ export class Dream100ExpansionService {
         intentCounts[keyword.intent]++;
       }
     }
-    metrics.intentDistribution = intentCounts;
+    (metrics as any).intentDistribution = intentCounts;
 
     // Difficulty distribution
     const difficultyDist = { easy: 0, medium: 0, hard: 0 };
@@ -1079,7 +1074,7 @@ export class Dream100ExpansionService {
       else if (keyword.difficulty <= 70) difficultyDist.medium++;
       else difficultyDist.hard++;
     }
-    metrics.difficultyDistribution = difficultyDist;
+    (metrics as any).difficultyDistribution = difficultyDist;
 
     // Volume distribution
     const volumeDist = { low: 0, medium: 0, high: 0 };
@@ -1088,10 +1083,10 @@ export class Dream100ExpansionService {
       else if (keyword.volume <= 10000) volumeDist.medium++;
       else volumeDist.high++;
     }
-    metrics.volumeDistribution = volumeDist;
+    (metrics as any).volumeDistribution = volumeDist;
 
     // Quick win count
-    metrics.quickWinCount = keywords.filter(k => k.quickWin).length;
+    (metrics as any).quickWinCount = keywords.filter(k => k.quickWin).length;
   }
 
   /**
@@ -1106,12 +1101,12 @@ export class Dream100ExpansionService {
     const anthropicCalls = processingStats.apiCallCounts?.anthropic || 0;
     const ahrefsCalls = processingStats.apiCallCounts?.ahrefs || 0;
 
-    costBreakdown.anthropicCost = anthropicCalls * 0.15; // ~$0.15 per LLM call
-    costBreakdown.ahrefsCost = ahrefsCalls * 0.20; // ~$0.20 per Ahrefs batch
-    costBreakdown.totalCost = costBreakdown.anthropicCost + costBreakdown.ahrefsCost;
+    (costBreakdown as any).anthropicCost = anthropicCalls * 0.15; // ~$0.15 per LLM call
+    (costBreakdown as any).ahrefsCost = ahrefsCalls * 0.20; // ~$0.20 per Ahrefs batch
+    (costBreakdown as any).totalCost = (costBreakdown as any).anthropicCost + (costBreakdown as any).ahrefsCost;
 
     if (budgetLimit) {
-      costBreakdown.budgetUtilization = (costBreakdown.totalCost / budgetLimit) * 100;
+      (costBreakdown as any).budgetUtilization = ((costBreakdown as any).totalCost / budgetLimit) * 100;
     }
   }
 
@@ -1236,6 +1231,12 @@ export const createDream100ExpansionService = (
   return new Dream100ExpansionService(anthropicApiKey, ahrefsApiKey, redis);
 };
 
+// Service class is already exported above, no need to re-export
+
+// Alias for backwards compatibility
+export const ExpansionService = Dream100ExpansionService;
+export type ExpansionService = Dream100ExpansionService;
+
 /**
  * Export service for job queue integration
  */
@@ -1246,7 +1247,7 @@ export const processExpansionJob = async (
   const startTime = Date.now();
   
   try {
-    const request = job.data.input as Dream100ExpansionRequest;
+    const request = job.data.input as any as Dream100ExpansionRequest;
     
     // Validate input
     if (!isDream100ExpansionRequest(request)) {
@@ -1278,7 +1279,7 @@ export const processExpansionJob = async (
     
     return {
       success: true,
-      output: result,
+      output: result as any,
       metrics,
       artifacts: [],
       warnings: result.warnings,

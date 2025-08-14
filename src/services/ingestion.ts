@@ -21,19 +21,21 @@ import { z } from 'zod';
 import * as Sentry from '@sentry/nextjs';
 import type {
   CreateRunInput,
-  CreateRunInputSchema,
   Run,
   RunSettings,
-  getDefaultRunSettings,
   UUID,
   Timestamp,
   Settings,
   CreateSettingsInput,
   UpdateSettingsInput,
   UserPreferences,
-  getDefaultUserPreferences,
   ApiKeyInfo,
   SettingsValidation
+} from '../models';
+import {
+  CreateRunInputSchema,
+  getDefaultRunSettings,
+  getDefaultUserPreferences
 } from '../models';
 import { DatabaseService, AdminTables } from '../lib/supabase';
 import { TokenBucket } from '../utils/rate-limiter';
@@ -366,11 +368,7 @@ export class IngestionService {
         Sentry.captureException(error);
       });
 
-      const apiError = ErrorHandler.handle(error as Error, {
-        operation: 'ingestion',
-        requestId,
-        userId: request.userId
-      });
+      const apiError = new Error(`Ingestion failed: ${error instanceof Error ? error.message : String(error)}`);
 
       // Return error response
       return {
@@ -423,9 +421,9 @@ export class IngestionService {
         warnings: [],
         errors: [{
           type: 'system',
-          code: apiError.code,
+          code: 'INGESTION_ERROR',
           message: apiError.message,
-          retryable: apiError.retryable
+          retryable: false
         }]
       };
     }
@@ -574,10 +572,7 @@ export class IngestionService {
       }
       
     } catch (error) {
-      throw ErrorHandler.handle(error as Error, {
-        operation: 'update_settings',
-        userId
-      });
+      throw new Error(`Settings update failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -616,18 +611,40 @@ export class IngestionService {
         recommendations.push('Consider upgrading your API plan to increase quotas');
       }
 
+      // Transform ApiKeyValidation to ApiKeyInfo format
+      const apiKeyInfo: {
+        readonly ahrefs: ApiKeyInfo;
+        readonly anthropic: ApiKeyInfo;
+      } = {
+        ahrefs: {
+          provider: 'ahrefs' as const,
+          isConfigured: apiValidation.ahrefs.isConfigured,
+          lastValidated: null, // This would need to be tracked separately
+          isValid: apiValidation.ahrefs.isValid,
+          quotaRemaining: apiValidation.ahrefs.quotaRemaining || null,
+          nextResetDate: null, // This would need to be tracked separately
+          errorMessage: apiValidation.ahrefs.errorMessage || null
+        },
+        anthropic: {
+          provider: 'anthropic' as const,
+          isConfigured: apiValidation.anthropic.isConfigured,
+          lastValidated: null, // This would need to be tracked separately
+          isValid: apiValidation.anthropic.isValid,
+          quotaRemaining: apiValidation.anthropic.quotaRemaining || null,
+          nextResetDate: null, // This would need to be tracked separately
+          errorMessage: apiValidation.anthropic.errorMessage || null
+        }
+      };
+
       return {
         isValid,
-        apiKeys: apiValidation,
+        apiKeys: apiKeyInfo,
         warnings,
         recommendations
       };
       
     } catch (error) {
-      throw ErrorHandler.handle(error as Error, {
-        operation: 'settings_validation',
-        userId
-      });
+      throw new Error(`Settings validation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1094,10 +1111,7 @@ export class IngestionService {
       .single();
 
     if (error) {
-      throw ErrorHandler.handle(error, {
-        operation: 'create_run',
-        userId: request.userId
-      });
+      throw new Error(`Run creation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return data.id;

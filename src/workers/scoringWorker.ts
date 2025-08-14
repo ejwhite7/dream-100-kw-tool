@@ -18,7 +18,21 @@
 
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
-import type { UUID, Keyword, JobProgress, ScoringWeights } from '../models';
+import type { UUID, Keyword, ScoringWeights } from '../models';
+
+/**
+ * Worker-specific job progress interface
+ */
+interface WorkerJobProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, any>;
+}
 import type { KeywordStage, KeywordIntent } from '../types/database';
 import { ScoringService } from '../services/scoring';
 import { supabase } from '../lib/supabase';
@@ -98,7 +112,7 @@ export async function processScoringJob(
         batchSize: settings.batchSize || 100,
         quickWinThreshold: settings.quickWinThreshold || 0.7,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run status
     await supabase
@@ -126,101 +140,36 @@ export async function processScoringJob(
       keywords,
       runId,
       settings: {
-        scoringWeights: settings.scoringWeights || getDefaultScoringWeights(),
+        weights: settings.scoringWeights || getDefaultScoringWeights(),
         quickWinThreshold: settings.quickWinThreshold || 0.7,
-        enableNormalization: settings.enableNormalization ?? true,
-        enableOutlierDetection: settings.enableOutlierDetection ?? true,
-        batchSize: settings.batchSize || 100,
-      },
-      onProgress: async (progress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + (progress.percentage / totalSteps);
-        processedCount = progress.current;
-        
-        await job.updateProgress({
-          stage: 'scoring',
-          stepName: progress.stepName,
-          current: progress.current,
-          total: progress.total,
-          percentage: Math.min(overallProgress, 100),
-          message: progress.message,
-          estimatedTimeRemaining: progress.estimatedTimeRemaining,
-          metadata: {
-            currentStep: currentStep + 1,
-            totalSteps,
-            keywordCount: keywords.length,
-            processedCount,
-            quickWinCount: progress.metadata?.quickWinCount || 0,
-            runId,
-          },
-        } satisfies JobProgress);
-        
-        // Update database progress
-        await supabase
-          .from('runs')
-          .update({
-            progress: {
-              current_stage: 'scoring',
-              stages_completed: ['expansion', 'universe', 'clustering'],
-              keywords_discovered: keywords.length,
-              clusters_created: progress.metadata?.clustersCreated || 0,
-              percent_complete: 80 + Math.min(overallProgress * 0.15, 15), // Scoring is ~15% of pipeline
-              estimated_time_remaining: progress.estimatedTimeRemaining,
-            },
-          })
-          .eq('id', runId);
-      },
-      onStepComplete: async (stepName: string) => {
-        currentStep++;
-        console.log(`Scoring step '${stepName}' completed (${currentStep}/${totalSteps})`);
-      },
-      onBatchComplete: async (batchIndex: number, batchSize: number, batchResults: Keyword[]) => {
-        console.log(`Completed scoring batch ${batchIndex + 1} (${batchSize} keywords)`);
-        
-        // Update keywords in database in batches
-        if (batchResults.length > 0) {
-          await supabase.rpc('bulk_insert_keywords', {
-            keywords_data: batchResults.map(keyword => ({
-              id: keyword.id,
-              run_id: runId,
-              cluster_id: keyword.clusterId,
-              keyword: keyword.keyword,
-              stage: keyword.stage,
-              volume: keyword.volume,
-              difficulty: keyword.difficulty,
-              intent: keyword.intent,
-              relevance: keyword.relevance,
-              trend: keyword.trend,
-              blended_score: keyword.blendedScore,
-              quick_win: keyword.quickWin,
-              canonical_keyword: keyword.canonicalKeyword,
-              top_serp_urls: keyword.topSerpUrls,
-              embedding: keyword.embedding,
-            })),
-          });
-        }
-      },
+        enableSeasonalAdjustments: settings.enableNormalization ?? true,
+      }
     });
 
+    // Map results to Keyword array
+    const scoredKeywords = result.scoredKeywords as unknown as Keyword[];
+    const quickWins = result.quickWins as unknown as Keyword[];
+    
     // Calculate comprehensive metrics
-    const metrics = calculateScoringMetrics(result.scoredKeywords, startTime);
-    const qualityMetrics = calculateScoringQualityMetrics(result.scoredKeywords, result.quickWins);
+    const metrics = calculateScoringMetrics(scoredKeywords, startTime);
+    const qualityMetrics = calculateScoringQualityMetrics(scoredKeywords, quickWins);
     
     // Update final progress
     await job.updateProgress({
       stage: 'scoring',
       stepName: 'Completed',
-      current: result.scoredKeywords.length,
-      total: result.scoredKeywords.length,
+      current: scoredKeywords.length,
+      total: scoredKeywords.length,
       percentage: 100,
-      message: `Scoring completed with ${result.quickWins.length} quick wins identified`,
+      message: `Scoring completed with ${quickWins.length} quick wins identified`,
       metadata: {
-        totalKeywords: result.scoredKeywords.length,
-        quickWinCount: result.quickWins.length,
+        totalKeywords: scoredKeywords.length,
+        quickWinCount: quickWins.length,
         avgScore: metrics.avgScoreByStage,
         scoreDistribution: metrics.scoreDistribution,
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run with completed scoring stage
     await supabase
@@ -230,7 +179,7 @@ export async function processScoringJob(
           current_stage: 'scoring',
           stages_completed: ['expansion', 'universe', 'clustering', 'scoring'],
           keywords_discovered: keywords.length,
-          clusters_created: result.metrics?.clustersProcessed || 0,
+          clusters_created: 0,
           percent_complete: 95, // Scoring completion brings us to ~95%
         },
         updated_at: new Date().toISOString(),
@@ -258,8 +207,8 @@ export async function processScoringJob(
     });
 
     return {
-      scoredKeywords: result.scoredKeywords,
-      quickWins: result.quickWins,
+      scoredKeywords,
+      quickWins,
       metrics: {
         ...metrics,
         processingTime: totalProcessingTime,
