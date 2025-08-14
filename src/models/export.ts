@@ -46,29 +46,29 @@ export type ExportTemplate =
  */
 export interface ExportFilters {
   readonly keywords: {
-    readonly stages?: KeywordStage[];
-    readonly intents?: KeywordIntent[];
-    readonly minVolume?: number;
-    readonly maxVolume?: number;
-    readonly minDifficulty?: number;
-    readonly maxDifficulty?: number;
-    readonly minScore?: number;
-    readonly maxScore?: number;
-    readonly quickWinsOnly?: boolean;
-    readonly clusters?: UUID[];
+    readonly stages?: KeywordStage[] | undefined;
+    readonly intents?: KeywordIntent[] | undefined;
+    readonly minVolume?: number | undefined;
+    readonly maxVolume?: number | undefined;
+    readonly minDifficulty?: number | undefined;
+    readonly maxDifficulty?: number | undefined;
+    readonly minScore?: number | undefined;
+    readonly maxScore?: number | undefined;
+    readonly quickWinsOnly?: boolean | undefined;
+    readonly clusters?: UUID[] | undefined;
   };
   readonly roadmap: {
-    readonly stages?: RoadmapStage[];
-    readonly dris?: string[];
-    readonly dueDateFrom?: string;
-    readonly dueDateTo?: string;
-    readonly includeNotes?: boolean;
+    readonly stages?: RoadmapStage[] | undefined;
+    readonly dris?: string[] | undefined;
+    readonly dueDateFrom?: string | undefined;
+    readonly dueDateTo?: string | undefined;
+    readonly includeNotes?: boolean | undefined;
   };
   readonly clusters: {
-    readonly minSize?: number;
-    readonly maxSize?: number;
-    readonly minScore?: number;
-    readonly primaryIntents?: KeywordIntent[];
+    readonly minSize?: number | undefined;
+    readonly maxSize?: number | undefined;
+    readonly minScore?: number | undefined;
+    readonly primaryIntents?: KeywordIntent[] | undefined;
   };
 }
 
@@ -78,11 +78,11 @@ export interface ExportFilters {
 export interface ExportOptions {
   readonly includeMetadata: boolean;
   readonly includeAnalytics: boolean;
-  readonly groupBy?: 'cluster' | 'intent' | 'stage' | 'dri' | 'month';
-  readonly sortBy?: 'volume' | 'difficulty' | 'score' | 'date' | 'alphabetical';
-  readonly sortDirection?: 'asc' | 'desc';
-  readonly maxRows?: number;
-  readonly customFields?: CustomField[];
+  readonly groupBy?: 'cluster' | 'intent' | 'stage' | 'dri' | 'month' | undefined;
+  readonly sortBy?: 'volume' | 'difficulty' | 'score' | 'date' | 'alphabetical' | undefined;
+  readonly sortDirection?: 'asc' | 'desc' | undefined;
+  readonly maxRows?: number | undefined;
+  readonly customFields?: CustomField[] | undefined;
   readonly formatting: {
     readonly dateFormat: 'US' | 'EU' | 'ISO';
     readonly numberFormat: 'US' | 'EU';
@@ -109,12 +109,12 @@ export interface CustomField {
 export interface ExportScheduling {
   readonly enabled: boolean;
   readonly frequency: 'daily' | 'weekly' | 'monthly';
-  readonly dayOfWeek?: number; // 0-6 for weekly
-  readonly dayOfMonth?: number; // 1-31 for monthly
+  readonly dayOfWeek?: number | undefined; // 0-6 for weekly
+  readonly dayOfMonth?: number | undefined; // 1-31 for monthly
   readonly time: string; // HH:mm format
   readonly timezone: string;
-  readonly lastRun?: Timestamp;
-  readonly nextRun?: Timestamp;
+  readonly lastRun?: Timestamp | undefined;
+  readonly nextRun?: Timestamp | undefined;
 }
 
 /**
@@ -122,7 +122,7 @@ export interface ExportScheduling {
  */
 export interface ExportDestination {
   readonly type: 'email' | 'url' | 'cloud_storage' | 'database';
-  readonly config: DestinationConfig;
+  readonly config?: DestinationConfig;
   readonly enabled: boolean;
 }
 
@@ -444,11 +444,13 @@ export const ExportConfigSchema = z.object({
     dayOfWeek: z.number().int().min(0).max(6).optional(),
     dayOfMonth: z.number().int().min(1).max(31).optional(),
     time: z.string().regex(/^\d{2}:\d{2}$/),
-    timezone: z.string().min(1).max(50)
-  }).nullable().optional(),
+    timezone: z.string().min(1).max(50),
+    lastRun: z.string().optional(),
+    nextRun: z.string().optional()
+  }).nullable(),
   destinations: z.array(z.object({
     type: z.enum(['email', 'url', 'cloud_storage', 'database']),
-    config: z.unknown(), // Union type would be complex
+    config: z.any(), // Allowing any config type for flexibility
     enabled: z.boolean().default(true)
   })).default([])
 });

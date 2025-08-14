@@ -308,7 +308,7 @@ export class UserActivityTracker {
       existing.lastSeen = session.lastActivity;
       
       // Update favorite features
-      const sessionFeatures = [...new Set(session.activities.map(a => a.feature))];
+      const sessionFeatures = Array.from(new Set(session.activities.map(a => a.feature)));
       sessionFeatures.forEach(feature => {
         if (!existing.favoriteFeatures.includes(feature)) {
           existing.favoriteFeatures.push(feature);
@@ -320,7 +320,7 @@ export class UserActivityTracker {
         existing.favoriteFeatures = existing.favoriteFeatures.slice(0, 5);
       }
     } else {
-      const sessionFeatures = [...new Set(session.activities.map(a => a.feature))];
+      const sessionFeatures = Array.from(new Set(session.activities.map(a => a.feature)));
       
       this.userMetrics.set(userId, {
         userId,

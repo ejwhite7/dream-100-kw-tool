@@ -20,7 +20,7 @@ import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
 import type { UUID, Keyword } from '../models';
 import type { KeywordStage, KeywordIntent } from '../types/database';
-import { ExpansionService } from '../services/expansion';
+import { ExpansionService, type Dream100ExpansionRequest, type ExpansionProgressCallback } from '../services/expansion';
 
 /**
  * Worker-specific job progress interface
@@ -137,16 +137,19 @@ export async function processExpansionJob(
     let currentStep = 0;
     const totalSteps = 6; // LLM expansion, Ahrefs enrichment, Intent classification, Relevance scoring, Quality filtering, Final selection
     
-    const result = await expansionService.expandToDream100({
+    const expansionRequest: Dream100ExpansionRequest = {
       runId,
       seedKeywords,
       targetCount: settings.maxDream100 || 100,
       market: settings.market || 'US',
       qualityThreshold: 0.7,
       includeCompetitorAnalysis: settings.commercialFocus || false
-    },
-      async (progress: any) => {
-        const overallProgress = progress.progressPercent;
+    };
+    
+    const result = await expansionService.expandToDream100(
+      expansionRequest,
+      async (progress) => {
+        const overallProgress = progress.progressPercent || 0;
         
         await job.updateProgress({
           stage: 'expansion',

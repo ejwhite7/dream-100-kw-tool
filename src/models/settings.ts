@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import type { UUID, Timestamp, EmailString } from './index';
-import type { ScoringWeights } from './scoring';
+import type { ScoringWeights, StageWeights } from './scoring';
 
 /**
  * Core settings interface matching database schema
@@ -730,7 +730,13 @@ export const getRecommendedSettings = (
   impact: 'low' | 'medium' | 'high';
   actionRequired: boolean;
 }> => {
-  const recommendations = [];
+  const recommendations: Array<{
+    type: 'performance' | 'cost' | 'quality';
+    title: string;
+    description: string;
+    impact: 'low' | 'medium' | 'high';
+    actionRequired: boolean;
+  }> = [];
   const { metrics, costs } = currentUsage;
   
   // Performance recommendations

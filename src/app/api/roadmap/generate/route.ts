@@ -46,8 +46,9 @@ interface GenerateRoadmapResponse {
 export async function POST(request: NextRequest): Promise<NextResponse<GenerateRoadmapResponse>> {
   const startTime = Date.now();
   // Error handler for this route
-  const handleError = (error: Error) => ErrorHandler.handle(error, {
-    operation: 'roadmap_generation'
+  const handleError = (error: Error) => ErrorHandler.handleWorkflowError(error, {
+    stage: 'roadmap_generation',
+    runId: 'unknown'
   });
 
   try {

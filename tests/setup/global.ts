@@ -7,8 +7,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
-import dotenv from 'dotenv';
-import path from 'path';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
 
 // Load test environment variables
 dotenv.config({ path: path.resolve(process.cwd(), '.env.test') });
@@ -76,7 +76,6 @@ async function initializeTestCache(): Promise<void> {
     console.log('🔴 Initializing test cache...');
     
     const redis = new Redis(process.env.REDIS_URL!, {
-      retryDelayOnFailover: 100,
       enableReadyCheck: false,
       lazyConnect: true
     });

@@ -374,13 +374,15 @@ export class BusinessMetrics {
       }
 
       const stats = featureStats[activity.feature];
-      stats.users.add(activity.userId);
-      stats.sessions.add(activity.sessionId);
-      stats.actions++;
-      
-      if (activity.duration) {
-        stats.totalDuration += activity.duration;
-        stats.durationCount++;
+      if (stats) {
+        stats.users.add(activity.userId);
+        stats.sessions.add(activity.sessionId);
+        stats.actions++;
+        
+        if (activity.duration) {
+          stats.totalDuration += activity.duration;
+          stats.durationCount++;
+        }
       }
     });
 
@@ -430,16 +432,18 @@ export class BusinessMetrics {
       }
 
       const stats = statsByStage[metric.stage];
-      stats.totalRuns++;
-      stats.totalKeywords += metric.keywordCount;
-      stats.avgProcessingTime = ((stats.avgProcessingTime * (stats.totalRuns - 1)) + metric.processingTime) / stats.totalRuns;
-      stats.avgSuccessRate = ((stats.avgSuccessRate * (stats.totalRuns - 1)) + metric.successRate) / stats.totalRuns;
-      
-      if (metric.qualityScore) {
-        stats.avgQualityScore = ((stats.avgQualityScore * (stats.totalRuns - 1)) + metric.qualityScore) / stats.totalRuns;
+      if (stats) {
+        stats.totalRuns++;
+        stats.totalKeywords += metric.keywordCount;
+        stats.avgProcessingTime = ((stats.avgProcessingTime * (stats.totalRuns - 1)) + metric.processingTime) / stats.totalRuns;
+        stats.avgSuccessRate = ((stats.avgSuccessRate * (stats.totalRuns - 1)) + metric.successRate) / stats.totalRuns;
+        
+        if (metric.qualityScore) {
+          stats.avgQualityScore = ((stats.avgQualityScore * (stats.totalRuns - 1)) + metric.qualityScore) / stats.totalRuns;
+        }
+        
+        stats.throughput = stats.totalKeywords / (stats.avgProcessingTime / 1000);
       }
-      
-      stats.throughput = stats.totalKeywords / (stats.avgProcessingTime / 1000);
     });
 
     return statsByStage;
@@ -503,8 +507,8 @@ export class BusinessMetrics {
           count: metrics.length,
           totalValue: metrics.reduce((sum, m) => sum + m.value, 0),
           timeRange: {
-            start: metrics[0].timestamp,
-            end: metrics[metrics.length - 1].timestamp
+            start: metrics[0]?.timestamp,
+            end: metrics[metrics.length - 1]?.timestamp
           }
         });
         

@@ -11,7 +11,13 @@ export interface CacheConfig {
   redis?: RedisOptions | {
     cluster?: {
       nodes: { host: string; port: number }[];
-      options?: any;
+      options?: {
+        redisOptions?: RedisOptions;
+        enableOfflineQueue?: boolean;
+        slotsRefreshTimeout?: number;
+        maxRetriesPerRequest?: number;
+        [key: string]: any;
+      };
     };
   };
   defaultTtl: number;
@@ -105,7 +111,11 @@ export interface CacheWarmingConfig {
 export class CacheService {
   private redis: Redis | Cluster | null = null;
   private fallbackCache: Map<string, { value: any; expiry: number }> = new Map();
-  private config: Required<CacheConfig>;
+  private config: CacheConfig & {
+    compression: Required<CacheConfig['compression']>;
+    serialization: Required<CacheConfig['serialization']>;
+    monitoring: Required<CacheConfig['monitoring']>;
+  };
   private stats: CacheStats;
   private isHealthy = false;
   private connectionAttempts = 0;
@@ -118,17 +128,20 @@ export class CacheService {
       compression: {
         enabled: true,
         threshold: 1024, // 1KB
+        ...config.compression,
       },
       serialization: {
-        format: 'json',
+        format: 'json' as const,
+        ...config.serialization,
       },
-      keyPrefix: 'dream100:',
-      maxKeyLength: 250,
+      keyPrefix: config.keyPrefix || 'dream100:',
+      maxKeyLength: config.maxKeyLength || 250,
       monitoring: {
         enabled: true,
         statsInterval: 60000, // 1 minute
+        ...config.monitoring,
       },
-      ...config,
+      redis: config.redis,
     };
     
     this.stats = {
@@ -145,7 +158,7 @@ export class CacheService {
     
     this.initializeRedis();
     
-    if (this.config.monitoring.enabled) {
+    if (this.config.monitoring?.enabled) {
       this.startMonitoring();
     }
     
@@ -162,20 +175,22 @@ export class CacheService {
             this.config.redis.cluster.nodes,
             {
               redisOptions: {
-                retryDelayOnFailover: 1000,
                 maxRetriesPerRequest: 3,
                 lazyConnect: true,
+                ...this.config.redis.cluster.options?.redisOptions,
               },
+              enableOfflineQueue: this.config.redis.cluster.options?.enableOfflineQueue ?? false,
+              slotsRefreshTimeout: this.config.redis.cluster.options?.slotsRefreshTimeout ?? 10000,
+              maxRetriesPerRequest: this.config.redis.cluster.options?.maxRetriesPerRequest ?? 3,
               ...this.config.redis.cluster.options,
             }
           );
         } else {
           // Standalone Redis setup
           this.redis = new Redis({
-            retryDelayOnFailover: 1000,
             maxRetriesPerRequest: 3,
             lazyConnect: true,
-            ...this.config.redis,
+            ...(this.config.redis as RedisOptions),
           });
         }
         
@@ -216,7 +231,7 @@ export class CacheService {
   private startMonitoring(): void {
     setInterval(async () => {
       await this.updateStats();
-    }, this.config.monitoring.statsInterval);
+    }, this.config.monitoring?.statsInterval || 60000);
   }
   
   private async updateStats(): Promise<void> {
@@ -295,9 +310,9 @@ export class CacheService {
     const key = parts.join(':');
     
     // Ensure key doesn't exceed max length
-    if (key.length > this.config.maxKeyLength) {
+    if (key.length > (this.config.maxKeyLength || 250)) {
       const hash = createHash('sha256').update(key).digest('hex').substring(0, 16);
-      return `${this.config.keyPrefix}hash:${hash}`;
+      return `${this.config.keyPrefix || 'dream100:'}hash:${hash}`;
     }
     
     return key;
@@ -309,16 +324,16 @@ export class CacheService {
   private async serialize(data: any, compress = false): Promise<Buffer | string> {
     let serialized: string;
     
-    if (this.config.serialization.format === 'json') {
+    if (this.config.serialization?.format === 'json') {
       serialized = JSON.stringify(data);
     } else {
       // Future: msgpack support
       serialized = JSON.stringify(data);
     }
     
-    if (compress && this.config.compression.enabled) {
+    if (compress && this.config.compression?.enabled) {
       const buffer = Buffer.from(serialized, 'utf8');
-      if (buffer.length > this.config.compression.threshold) {
+      if (buffer.length > (this.config.compression?.threshold || 1024)) {
         return await compressAsync(buffer);
       }
     }
@@ -339,7 +354,7 @@ export class CacheService {
       serialized = data.toString();
     }
     
-    if (this.config.serialization.format === 'json') {
+    if (this.config.serialization?.format === 'json') {
       return JSON.parse(serialized);
     } else {
       // Future: msgpack support
@@ -391,7 +406,7 @@ export class CacheService {
       return null;
     } catch (error) {
       this.stats.errors++;
-      console.error('Cache get error:', error);
+      console.error('Cache get error:', (error as Error).message);
       
       // Try fallback cache
       const cached = this.fallbackCache.get(cacheKey);
@@ -423,7 +438,7 @@ export class CacheService {
     try {
       // Determine if we should compress
       const shouldCompress = options.compress !== false && 
-        this.config.compression.enabled;
+        (this.config.compression?.enabled || false);
       
       const serialized = await this.serialize(value, shouldCompress);
       const isCompressed = Buffer.isBuffer(serialized);
@@ -436,7 +451,7 @@ export class CacheService {
         if (options.tags && options.tags.length > 0) {
           const pipeline = this.redis.pipeline();
           for (const tag of options.tags) {
-            const tagKey = `${this.config.keyPrefix}tag:${tag}`;
+            const tagKey = `${this.config.keyPrefix || 'dream100:'}tag:${tag}`;
             pipeline.sadd(tagKey, cacheKey);
             pipeline.expire(tagKey, ttlSeconds);
           }
@@ -455,7 +470,7 @@ export class CacheService {
       return true;
     } catch (error) {
       this.stats.errors++;
-      console.error('Cache set error:', error);
+      console.error('Cache set error:', (error as Error).message);
       
       // Try fallback cache
       this.fallbackCache.set(cacheKey, {
@@ -491,7 +506,7 @@ export class CacheService {
       return true;
     } catch (error) {
       this.stats.errors++;
-      console.error('Cache delete error:', error);
+      console.error('Cache delete error:', (error as Error).message);
       
       // Still try to delete from fallback
       this.fallbackCache.delete(cacheKey);
@@ -524,14 +539,14 @@ export class CacheService {
           results?.map(async (result, index) => {
             if (result && result[1] !== null) {
               this.stats.hits++;
-              return await this.deserialize(result[1]);
+              return await this.deserialize(result[1] as Buffer | string);
             }
             this.stats.misses++;
             return null;
           }) || []
         );
       } catch (error) {
-        console.error('Batch get error:', error);
+        console.error('Batch get error:', (error as Error).message);
       }
     }
     
@@ -572,7 +587,7 @@ export class CacheService {
         
         return results?.map(result => result[1] === 'OK') || [];
       } catch (error) {
-        console.error('Batch set error:', error);
+        console.error('Batch set error:', (error as Error).message);
       }
     }
     
@@ -605,7 +620,7 @@ export class CacheService {
       
       return deletedCount;
     } catch (error) {
-      console.error('Tag invalidation error:', error);
+      console.error('Tag invalidation error:', (error as Error).message);
       return 0;
     }
   }
@@ -638,7 +653,7 @@ export class CacheService {
       
       return result === 'OK' ? value : null;
     } catch (error) {
-      console.error('Lock acquisition error:', error);
+      console.error('Lock acquisition error:', (error as Error).message);
       return null;
     }
   }
@@ -672,7 +687,7 @@ export class CacheService {
       const result = await this.redis.eval(script, 1, key, lockValue);
       return result === 1;
     } catch (error) {
-      console.error('Lock release error:', error);
+      console.error('Lock release error:', (error as Error).message);
       return false;
     }
   }
@@ -705,13 +720,13 @@ export class CacheService {
                   await this.set(key, data, { ttl: pattern.ttl });
                 }
               } catch (error) {
-                console.warn(`Failed to warm cache for key ${key}:`, error);
+                console.warn(`Failed to warm cache for key ${key}:`, (error as Error).message);
               }
             })
           );
         }
       } catch (error) {
-        console.error(`Failed to warm cache for pattern ${pattern.pattern}:`, error);
+        console.error(`Failed to warm cache for pattern ${pattern.pattern}:`, (error as Error).message);
       }
     }
   }
@@ -737,18 +752,22 @@ export class CacheService {
         }
       }
     } catch (error) {
-      console.error('Cache clear error:', error);
+      console.error('Cache clear error:', (error as Error).message);
     }
     
     // Clear fallback cache
     if (pattern) {
       const regex = new RegExp(pattern.replace(/\*/g, '.*'));
-      for (const key of this.fallbackCache.keys()) {
+      const keysToDelete: string[] = [];
+      this.fallbackCache.forEach((_, key) => {
         if (regex.test(key)) {
-          this.fallbackCache.delete(key);
-          deletedCount++;
+          keysToDelete.push(key);
         }
-      }
+      });
+      keysToDelete.forEach(key => {
+        this.fallbackCache.delete(key);
+        deletedCount++;
+      });
     } else {
       this.fallbackCache.clear();
     }
@@ -784,7 +803,7 @@ export class CacheService {
         issues.push('Redis client not initialized');
       }
     } catch (error) {
-      issues.push(`Redis connection error: ${error.message}`);
+      issues.push(`Redis connection error: ${(error as Error).message}`);
     }
     
     // Check error rates
@@ -816,11 +835,13 @@ export class CacheService {
   
   private cleanupFallbackCache(): void {
     const now = Date.now();
-    for (const [key, entry] of this.fallbackCache.entries()) {
+    const expiredKeys: string[] = [];
+    this.fallbackCache.forEach((entry, key) => {
       if (entry.expiry < now) {
-        this.fallbackCache.delete(key);
+        expiredKeys.push(key);
       }
-    }
+    });
+    expiredKeys.forEach(key => this.fallbackCache.delete(key));
   }
   
   /**

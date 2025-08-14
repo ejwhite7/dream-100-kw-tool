@@ -127,6 +127,7 @@ export interface ClusteringParams {
 export interface ClusteringResult {
   readonly clusters: ClusterWithKeywords[];
   readonly outliers: Keyword[];
+  readonly unclusteredKeywords: Keyword[]; // Alias for outliers for compatibility
   readonly parameters: ClusteringParams;
   readonly metrics: ClusteringMetrics;
   readonly processingTime: number;
@@ -142,6 +143,7 @@ export interface ClusteringMetrics {
   readonly outlierCount: number;
   readonly avgClusterSize: number;
   readonly avgSilhouetteScore: number;
+  readonly silhouetteScore: number; // Alias for avgSilhouetteScore
   readonly withinClusterSimilarity: number;
   readonly betweenClusterSeparation: number;
   readonly coverageRatio: number; // keywords clustered / total keywords
@@ -225,22 +227,26 @@ export interface ClusterValidation {
 /**
  * Validation schemas using Zod
  */
-export const IntentMixSchema = z.object({
+const IntentMixBaseSchema = z.object({
   transactional: z.number().min(0).max(1),
   commercial: z.number().min(0).max(1),
   informational: z.number().min(0).max(1),
   navigational: z.number().min(0).max(1)
-}).refine(data => {
+});
+
+export const IntentMixSchema = IntentMixBaseSchema.refine(data => {
   const sum = data.transactional + data.commercial + data.informational + data.navigational;
   return Math.abs(sum - 1) < 0.01; // Allow for floating point precision
 }, {
   message: "Intent mix percentages must sum to 1.0"
 });
 
+export const PartialIntentMixSchema = IntentMixBaseSchema.partial();
+
 export const CreateClusterInputSchema = z.object({
   runId: z.string().uuid(),
   label: z.string().min(1).max(100).transform(val => val.trim()),
-  intentMix: IntentMixSchema.partial().optional(),
+  intentMix: PartialIntentMixSchema.optional(),
   representativeKeywords: z.array(z.string().min(1).max(255)).max(10).optional(),
   similarityThreshold: z.number().min(0).max(1).default(0.7),
   embedding: z.array(z.number()).max(1536).optional()
@@ -249,7 +255,7 @@ export const CreateClusterInputSchema = z.object({
 export const UpdateClusterInputSchema = z.object({
   label: z.string().min(1).max(100).transform(val => val.trim()).optional(),
   score: z.number().min(0).max(1).optional(),
-  intentMix: IntentMixSchema.partial().optional(),
+  intentMix: PartialIntentMixSchema.optional(),
   representativeKeywords: z.array(z.string().min(1).max(255)).max(10).optional(),
   similarityThreshold: z.number().min(0).max(1).optional(),
   embedding: z.array(z.number()).max(1536).optional()

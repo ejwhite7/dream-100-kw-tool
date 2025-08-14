@@ -174,10 +174,10 @@ export class CacheWarmingManager {
             success: false,
             itemsWarmed: 0,
             timeTaken,
-            error: error.message,
+            error: (error as Error).message,
           });
           
-          console.error(`Cache warming strategy ${strategy.name} failed:`, error);
+          console.error(`Cache warming strategy ${strategy.name} failed:`, (error as Error).message);
         }
       }
       
@@ -254,7 +254,7 @@ export class CacheWarmingManager {
           );
         }
       } catch (error) {
-        console.error(`Failed to warm metrics for market ${market}:`, error);
+        console.error(`Failed to warm metrics for market ${market}:`, (error as Error).message);
       }
     }
   }
@@ -305,7 +305,7 @@ export class CacheWarmingManager {
             );
           }
         } catch (error) {
-          console.error(`Failed to warm expansion for ${seedKeywords.join(', ')}:`, error);
+          console.error(`Failed to warm expansion for ${seedKeywords.join(', ')}:`, (error as Error).message);
         }
       }
     }
@@ -366,7 +366,7 @@ export class CacheWarmingManager {
         );
       }
     } catch (error) {
-      console.error('Failed to warm intent classifications:', error);
+      console.error('Failed to warm intent classifications:', (error as Error).message);
     }
   }
   
@@ -410,7 +410,7 @@ export class CacheWarmingManager {
         );
       }
     } catch (error) {
-      console.error('Failed to warm embeddings:', error);
+      console.error('Failed to warm embeddings:', (error as Error).message);
     }
   }
   
@@ -463,7 +463,7 @@ export class CacheWarmingManager {
             );
           }
         } catch (error) {
-          console.error(`Failed to warm SERP data for ${keyword}:`, error);
+          console.error(`Failed to warm SERP data for ${keyword}:`, (error as Error).message);
         }
       }
     }
@@ -522,7 +522,7 @@ export class CacheWarmingManager {
           strategies: result.results.length,
         });
       } catch (error) {
-        console.error('Scheduled cache warming failed:', error);
+        console.error('Scheduled cache warming failed:', (error as Error).message);
       }
     }, intervalMs);
   }

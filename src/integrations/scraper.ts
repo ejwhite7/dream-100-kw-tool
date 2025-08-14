@@ -157,11 +157,19 @@ export class WebScraper extends BaseApiClient {
     } catch (error) {
       clearTimeout(timeoutId);
       
-      if (error.name === 'AbortError') {
-        throw ErrorHandler.createTimeoutError(options.timeout, 'scraper');
+      if ((error as Error).name === 'AbortError') {
+        throw ErrorHandler.handleNetworkError(error as Error, {
+          url: endpoint,
+          method: 'GET',
+          timeout: true
+        });
       }
       
-      throw ErrorHandler.createNetworkError(error as Error, 'scraper');
+      throw ErrorHandler.handleNetworkError(error as Error, {
+        url: endpoint,
+        method: 'GET',
+        timeout: false
+      });
     }
   }
   
@@ -261,7 +269,7 @@ export class WebScraper extends BaseApiClient {
               statusCode: apiError.statusCode
             });
             
-            console.warn(`Failed to scrape ${url}:`, error.message);
+            console.warn(`Failed to scrape ${url}:`, (error as Error).message);
           }
         }
         
@@ -269,7 +277,7 @@ export class WebScraper extends BaseApiClient {
         // If domain-level error, mark all URLs as failed
         results.failed.push(...domainUrls.map(url => ({
           url,
-          error: `Domain error: ${domainError.message}`
+          error: `Domain error: ${(domainError as Error).message}`
         })));
       }
     }
@@ -409,7 +417,7 @@ export class WebScraper extends BaseApiClient {
     
     try {
       // Extract title
-      const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/is);
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       result.title = titleMatch ? this.cleanText(titleMatch[1]) : '';
       
       // Extract meta description
@@ -417,11 +425,11 @@ export class WebScraper extends BaseApiClient {
       result.metaDescription = metaDescMatch ? this.cleanText(metaDescMatch[1]) : undefined;
       
       // Extract H1
-      const h1Match = html.match(/<h1[^>]*>(.*?)<\/h1>/is);
+      const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
       result.h1 = h1Match ? this.cleanText(h1Match[1]) : undefined;
       
       // Extract H2 tags
-      const h2Matches = html.match(/<h2[^>]*>(.*?)<\/h2>/gis);
+      const h2Matches = html.match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi);
       result.h2Tags = h2Matches ? 
         h2Matches.map(h2 => this.cleanText(h2.replace(/<h2[^>]*>|<\/h2>/gi, ''))) : [];
       
@@ -430,7 +438,7 @@ export class WebScraper extends BaseApiClient {
       result.canonical = canonicalMatch ? canonicalMatch[1] : undefined;
       
       // Extract basic content (remove HTML tags)
-      const bodyMatch = html.match(/<body[^>]*>(.*?)<\/body>/is);
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
       if (bodyMatch) {
         result.content = this.extractTextContent(bodyMatch[1]);
         result.wordCount = this.countWords(result.content);
@@ -471,10 +479,15 @@ export class WebScraper extends BaseApiClient {
     
     try {
       const robotsUrl = `https://${domain}/robots.txt`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(robotsUrl, {
-        timeout: 5000,
+        signal: controller.signal,
         headers: { 'User-Agent': userAgent }
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         // If robots.txt doesn't exist, assume allowed
@@ -490,7 +503,7 @@ export class WebScraper extends BaseApiClient {
       return { allowed, crawlDelay };
       
     } catch (error) {
-      console.warn(`Error checking robots.txt for ${domain}:`, error.message);
+      console.warn(`Error checking robots.txt for ${domain}:`, (error as Error).message);
       // Default to allowed if we can't check
       const result = { allowed: true, crawlDelay: 1 }; // 1 second default delay
       this.robotsCache.set(cacheKey, { ...result, timestamp: Date.now() });
@@ -540,7 +553,7 @@ export class WebScraper extends BaseApiClient {
       const sitemapUrls = await this.getSitemapUrls(domain);
       urls.push(...sitemapUrls.slice(0, maxUrls));
     } catch (error) {
-      console.warn(`Could not fetch sitemap for ${domain}:`, error.message);
+      console.warn(`Could not fetch sitemap for ${domain}:`, (error as Error).message);
     }
     
     // If we don't have enough URLs, try common page patterns
@@ -561,7 +574,11 @@ export class WebScraper extends BaseApiClient {
   
   private async getSitemapUrls(domain: string): Promise<string[]> {
     const sitemapUrl = `https://${domain}/sitemap.xml`;
-    const response = await fetch(sitemapUrl, { timeout: 10000 });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const response = await fetch(sitemapUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       throw new Error(`Sitemap not found: ${response.status}`);
@@ -588,10 +605,10 @@ export class WebScraper extends BaseApiClient {
       const words = text.match(/\b\w{3,}\b/g) || [];
       
       // Find dominant words (simple approach)
-      const wordFreq = words.reduce((acc, word) => {
-        acc[word] = (acc[word] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
+      const wordFreq: Record<string, number> = {};
+      words.forEach(word => {
+        wordFreq[word] = (wordFreq[word] || 0) + 1;
+      });
       
       const topWords = Object.entries(wordFreq)
         .sort(([,a], [,b]) => b - a)
@@ -642,8 +659,8 @@ export class WebScraper extends BaseApiClient {
   
   private extractTextContent(html: string): string {
     return html
-      .replace(/<script[^>]*>.*?<\/script>/gis, '') // Remove scripts
-      .replace(/<style[^>]*>.*?<\/style>/gis, '')   // Remove styles
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Remove scripts
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')   // Remove styles
       .replace(/<[^>]*>/g, ' ')                     // Remove HTML tags
       .replace(/\s+/g, ' ')                         // Normalize whitespace
       .trim();
@@ -655,11 +672,13 @@ export class WebScraper extends BaseApiClient {
   
   private cleanRobotsCache(): void {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    for (const [key, value] of this.robotsCache.entries()) {
+    const keysToDelete: string[] = [];
+    this.robotsCache.forEach((value, key) => {
       if (value.timestamp < oneDayAgo) {
-        this.robotsCache.delete(key);
+        keysToDelete.push(key);
       }
-    }
+    });
+    keysToDelete.forEach(key => this.robotsCache.delete(key));
   }
   
   private chunkArray<T>(array: T[], chunkSize: number): T[][] {

@@ -18,7 +18,8 @@
 
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
-import type { UUID, Keyword, ScoringWeights } from '../models';
+import type { UUID, Keyword } from '../models';
+import type { ScoringWeights } from '../models/scoring';
 
 /**
  * Worker-specific job progress interface
@@ -34,7 +35,7 @@ interface WorkerJobProgress {
   metadata?: Record<string, any>;
 }
 import type { KeywordStage, KeywordIntent } from '../types/database';
-import { ScoringService } from '../services/scoring';
+import { KeywordScoringService } from '../services/scoring';
 import { supabase } from '../lib/supabase';
 
 /**
@@ -96,7 +97,7 @@ export async function processScoringJob(
   
   try {
     // Initialize scoring service
-    const scoringService = new ScoringService();
+    const scoringService = new KeywordScoringService();
     
     // Update initial progress
     await job.updateProgress({
@@ -129,7 +130,11 @@ export async function processScoringJob(
       .eq('id', runId);
 
     // Group keywords by stage for stage-specific scoring
-    const keywordsByStage = groupKeywordsByStage(keywords);
+    const keywordsByStage = {
+      dream100: keywords.filter(k => k.stage === 'dream100'),
+      tier2: keywords.filter(k => k.stage === 'tier2'),
+      tier3: keywords.filter(k => k.stage === 'tier3')
+    };
     
     // Process scoring with progress tracking
     let currentStep = 0;
@@ -140,15 +145,66 @@ export async function processScoringJob(
       keywords,
       runId,
       settings: {
-        weights: settings.scoringWeights || getDefaultScoringWeights(),
+        weights: settings.scoringWeights || (await import('../models/scoring')).getDefaultScoringWeights(),
         quickWinThreshold: settings.quickWinThreshold || 0.7,
         enableSeasonalAdjustments: settings.enableNormalization ?? true,
       }
+    }, async (progress) => {
+      const overallProgress = progress.percentage || 0;
+      
+      await job.updateProgress({
+        stage: 'scoring',
+        stepName: progress.stepName,
+        current: progress.current,
+        total: progress.total,
+        percentage: Math.min(overallProgress, 100),
+        message: progress.message || 'Scoring keywords',
+        estimatedTimeRemaining: 0,
+        metadata: {
+          keywordCount: keywords.length,
+          processedCount: progress.current,
+          runId,
+        },
+      } satisfies WorkerJobProgress);
+      
+      // Update database progress
+      await supabase
+        .from('runs')
+        .update({
+          progress: {
+            current_stage: 'scoring',
+            stages_completed: ['expansion', 'universe', 'clustering'],
+            keywords_discovered: keywords.length,
+            percent_complete: 80 + Math.min(overallProgress * 0.15, 15), // Scoring is ~15% of pipeline
+          },
+        })
+        .eq('id', runId);
     });
 
-    // Map results to Keyword array
-    const scoredKeywords = result.scoredKeywords as unknown as Keyword[];
-    const quickWins = result.quickWins as unknown as Keyword[];
+    // Map results to Keyword array - converting from ScoringResult to Keyword
+    const scoredKeywords = result.scoredKeywords.map(scoringResult => {
+      // Find original keyword and update with score
+      const originalKeyword = keywords.find(k => k.keyword === scoringResult.keyword);
+      if (!originalKeyword) {
+        throw new Error(`Could not find original keyword: ${scoringResult.keyword}`);
+      }
+      return {
+        ...originalKeyword,
+        blendedScore: scoringResult.blendedScore,
+        quickWin: scoringResult.quickWin
+      };
+    });
+    const quickWins = result.quickWins.map(scoringResult => {
+      const originalKeyword = keywords.find(k => k.keyword === scoringResult.keyword);
+      if (!originalKeyword) {
+        throw new Error(`Could not find original keyword: ${scoringResult.keyword}`);
+      }
+      return {
+        ...originalKeyword,
+        blendedScore: scoringResult.blendedScore,
+        quickWin: scoringResult.quickWin
+      };
+    });
     
     // Calculate comprehensive metrics
     const metrics = calculateScoringMetrics(scoredKeywords, startTime);

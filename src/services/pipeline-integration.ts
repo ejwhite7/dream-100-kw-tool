@@ -32,7 +32,7 @@ export class KeywordResearchPipeline {
     redis?: any
   ) {
     // Initialize services
-    this.ingestionService = new IngestionService(); // Assuming constructor exists
+    this.ingestionService = IngestionService.getInstance();
     this.expansionService = createDream100ExpansionService(
       anthropicApiKey,
       ahrefsApiKey,
@@ -64,7 +64,7 @@ export class KeywordResearchPipeline {
       // Step 1: Ingestion and validation
       console.log('🔄 Step 1: Ingesting and validating input...');
       
-      const ingestionResult = await this.ingestionService.ingestKeywords({
+      const ingestionResult = await this.ingestionService.processIngestion({
         userId,
         seedKeywords,
         market,
@@ -120,7 +120,7 @@ export class KeywordResearchPipeline {
         stage: 'dream100',
         volume: keyword.volume,
         difficulty: keyword.difficulty,
-        intent: keyword.intent,
+        intent: keyword.intent || undefined,
         relevance: keyword.relevanceScore,
         canonicalKeyword: keyword.keyword,
         topSerpUrls: [] // Would be populated from SERP data
@@ -165,17 +165,17 @@ export class KeywordResearchPipeline {
     if (expansionResult.nextStageData?.tierExpansionSeeds?.length > 0) {
       jobs.push({
         runId,
-        stage: 'tier2_expansion',
+        stage: 'expansion',
         priority: 8,
         data: {
-          stage: 'tier2_expansion',
+          stage: 'expansion',
           input: {
             seedKeywords: expansionResult.nextStageData.tierExpansionSeeds.slice(0, 20),
             targetPerSeed: 10,
             runId
           },
           config: {
-            stage: 'tier2_expansion',
+            stage: 'expansion',
             parameters: {
               maxDepth: 2,
               qualityThreshold: 0.6
@@ -199,6 +199,10 @@ export class KeywordResearchPipeline {
           resources: {
             memory: 1024,
             cpu: 2,
+            apiQuota: {
+              ahrefs: 500,
+              anthropic: 10000
+            },
             storage: 512,
             estimatedDuration: 12
           }
@@ -209,17 +213,17 @@ export class KeywordResearchPipeline {
     // Job 2: Competitor discovery based on Dream 100 keywords
     jobs.push({
       runId,
-      stage: 'competitor_discovery',
+      stage: 'universe',
       priority: 6,
       data: {
-        stage: 'competitor_discovery',
+        stage: 'universe',
         input: {
           keywords: expansionResult.dream100Keywords.slice(0, 10).map((k: any) => k.keyword),
           market: 'US',
           maxCompetitors: 20
         },
         config: {
-          stage: 'competitor_discovery',
+          stage: 'universe',
           parameters: {
             serpDepth: 10,
             minDomainAuthority: 30
@@ -243,6 +247,9 @@ export class KeywordResearchPipeline {
         resources: {
           memory: 512,
           cpu: 1,
+          apiQuota: {
+            ahrefs: 1000
+          },
           storage: 256,
           estimatedDuration: 8
         }
@@ -252,18 +259,18 @@ export class KeywordResearchPipeline {
     // Job 3: Semantic clustering preparation
     jobs.push({
       runId,
-      stage: 'semantic_clustering',
+      stage: 'clustering',
       priority: 4,
       dependencies: ['tier2_expansion'], // Wait for tier-2 expansion
       data: {
-        stage: 'semantic_clustering',
+        stage: 'clustering',
         input: {
           keywords: expansionResult.dream100Keywords.map((k: any) => k.keyword),
           targetClusters: Math.ceil(expansionResult.dream100Keywords.length / 8),
           clusteringMethod: 'semantic'
         },
         config: {
-          stage: 'semantic_clustering',
+          stage: 'clustering',
           parameters: {
             minClusterSize: 3,
             maxClusterSize: 15,
@@ -288,6 +295,9 @@ export class KeywordResearchPipeline {
         resources: {
           memory: 2048,
           cpu: 2,
+          apiQuota: {
+            anthropic: 20000
+          },
           storage: 512,
           estimatedDuration: 6
         }
@@ -408,76 +418,4 @@ export const pipelineApiHandler = async (req: any, res: any) => {
       message: (error as Error).message 
     });
   }
-};
-
-/**
- * React hook for pipeline management
- */
-export const usePipeline = () => {
-  const [pipelineStatus, setPipelineStatus] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const executePipeline = async (seedKeywords: string[], settings = {}) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/pipeline/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: 'current-user-id', // Would come from auth context
-          seedKeywords,
-          settings
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Pipeline execution failed: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      setPipelineStatus(result);
-      return result;
-
-    } catch (err) {
-      setError((err as Error).message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const checkStatus = async (runId: string) => {
-    try {
-      const response = await fetch(`/api/pipeline/status/${runId}`);
-      const status = await response.json();
-      setPipelineStatus(status);
-      return status;
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const cancelPipeline = async (runId: string) => {
-    try {
-      const response = await fetch(`/api/pipeline/cancel/${runId}`, {
-        method: 'POST'
-      });
-      const result = await response.json();
-      return result;
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  return {
-    pipelineStatus,
-    loading,
-    error,
-    executePipeline,
-    checkStatus,
-    cancelPipeline
-  };
 };

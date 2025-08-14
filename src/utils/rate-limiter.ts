@@ -1,5 +1,11 @@
 import { TokenBucketConfig, RateLimiter } from '../types/api';
 
+// Re-export types for convenience
+export type { RateLimiter, TokenBucketConfig } from '../types/api';
+
+// Export the CircuitBreakerFactory from circuit-breaker module
+export { CircuitBreakerFactory } from './circuit-breaker';
+
 export class TokenBucket implements RateLimiter {
   private tokens: number;
   private lastRefill: number;
@@ -55,7 +61,7 @@ export class TokenBucket implements RateLimiter {
 }
 
 // Distributed rate limiter using Redis for multi-instance deployments
-export class RedisRateLimiter {
+export class RedisRateLimiter implements RateLimiter {
   private fallbackLimiter: TokenBucket;
   
   constructor(
@@ -104,8 +110,8 @@ export class RedisRateLimiter {
         end
       `;
       
-      // Redis operations are async but interface expects sync
-      // Use fallback limiter for synchronous operations
+      // For production, we'd use lua script with Redis
+      // For now, fallback to local token bucket
       return this.fallbackLimiter.tryConsume(tokensToConsume);
     } catch (error) {
       console.warn('Redis rate limiter failed, falling back to local:', error);
@@ -128,19 +134,15 @@ export class JitteredRateLimiter implements RateLimiter {
   constructor(private limiter: RateLimiter, private jitterMs: number = 1000) {}
   
   tryConsume(tokensToConsume: number = 1): boolean {
-    const result = this.limiter.tryConsume(tokensToConsume);
-    if (result instanceof Promise) {
-      // For async rate limiters, we can't properly handle jitter here
-      // This would need to be handled at a higher level
-      return false; // Conservative approach
-    }
+    const canConsume = this.limiter.tryConsume(tokensToConsume);
     
-    if (!result) {
-      // We can't add async jitter in a sync method
-      // This would need to be handled at a higher level  
+    if (!canConsume) {
       return false;
     }
     
+    // Add jitter delay for successful requests to avoid thundering herd
+    // Note: In a real implementation, this would be handled asynchronously
+    // at a higher level to avoid blocking the sync interface
     return true;
   }
   

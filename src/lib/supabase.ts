@@ -1,6 +1,6 @@
 // Supabase Client Configuration for Dream 100 Keyword Engine
 import { createClient } from '@supabase/supabase-js'
-import { Database } from '@/types/database'
+import { Database } from '../types/database'
 
 // Environment variables for Supabase configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -257,7 +257,9 @@ export class DatabaseService {
     }
 
     keywordCounts?.forEach(k => {
-      stageCounts[k.stage]++
+      if (k.stage && k.stage in stageCounts) {
+        stageCounts[k.stage as keyof typeof stageCounts]++
+      }
     })
 
     const { data: quickWinCount } = await Tables.keywords()

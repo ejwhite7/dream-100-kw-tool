@@ -17,9 +17,27 @@ import {
   BatchScoringConfig,
   getDefaultScoringWeights 
 } from '../models/scoring';
+import type { SeasonalFactor } from '../models/scoring';
 import { Keyword, ClusterWithKeywords, RunSettings } from '../models';
-import { logger } from '../utils/sentry';
-import type { KeywordStage } from '../types/database';
+import * as Sentry from '@sentry/nextjs';
+
+// Create a simple logger for this service
+const logger = {
+  info: (message: string, data?: any) => {
+    console.log(`[ScoringIntegration] ${message}`, data);
+  },
+  error: (message: string, data?: any) => {
+    console.error(`[ScoringIntegration] ${message}`, data);
+    Sentry.captureMessage(`ScoringIntegration: ${message}`, 'error');
+  },
+  warn: (message: string, data?: any) => {
+    console.warn(`[ScoringIntegration] ${message}`, data);
+  },
+  debug: (message: string, data?: any) => {
+    console.debug(`[ScoringIntegration] ${message}`, data);
+  }
+};
+import type { KeywordStage, KeywordIntent } from '../types/database';
 
 /**
  * Enhanced keyword with scoring results
@@ -47,7 +65,7 @@ export interface PipelineScoringConfig {
 /**
  * Scoring pipeline integration service
  */
-export class ScoringPipeline {
+class ScoringPipelineImpl {
   /**
    * Score keywords from expansion or universe generation stage
    */
@@ -76,9 +94,10 @@ export class ScoringPipeline {
       const batchConfig: BatchScoringConfig = {
         keywords: scoringInputs,
         weights,
-        normalizationMethod: config.performanceMode === 'speed' ? 'linear' : 'min-max',
+        normalizationMethod: config.performanceMode === 'speed' ? 'percentile' : 'min-max',
         quickWinThreshold: config.quickWinThreshold || 0.7,
-        applySeasonalAdjustments: config.enableSeasonalAdjustments || false
+        applySeasonalAdjustments: config.enableSeasonalAdjustments || false,
+        seasonalFactors: [] as SeasonalFactor[]
       };
 
       // Execute batch scoring
@@ -125,7 +144,7 @@ export class ScoringPipeline {
       logger.error('Scoring pipeline failed', {
         runId: config.runId,
         keywordCount: keywords.length,
-        error: error.message
+        error: (error as Error).message
       });
       throw error;
     }
@@ -190,7 +209,7 @@ export class ScoringPipeline {
       avgScore: number;
       topOpportunities: ScoredKeyword[];
     };
-    stageBreakdown: Record<KeywordStage, {
+    stageBreakdown: Record<string, {
       count: number;
       avgScore: number;
       quickWins: number;
@@ -203,9 +222,9 @@ export class ScoringPipeline {
     const avgScore = scoredKeywords.reduce((sum, k) => sum + k.blendedScore, 0) / scoredKeywords.length;
 
     // Stage breakdown
-    const stageBreakdown: Record<KeywordStage, any> = {} as any;
+    const stageBreakdown: Record<string, any> = {};
     
-    (['dream100', 'tier2', 'tier3'] as KeywordStage[]).forEach(stage => {
+    (['dream100', 'tier2', 'tier3']).forEach(stage => {
       const stageKeywords = scoredKeywords.filter(k => k.stage === stage);
       stageBreakdown[stage] = {
         count: stageKeywords.length,
@@ -234,7 +253,7 @@ export class ScoringPipeline {
         topOpportunities: detectQuickWins(
           scoredKeywords.map(k => k.scoringResult)
         ).slice(0, 10).map(result => 
-          scoredKeywords.find(k => k.keyword === result.keyword)!
+          scoredKeywords.find(k => k.keyword.toString() === result.keyword.toString())!
         )
       },
       stageBreakdown,
@@ -431,7 +450,7 @@ export class ScoringPipeline {
     } catch (error) {
       logger.error('Scoring quality validation failed', {
         runId,
-        error: error.message
+        error: (error as Error).message
       });
     }
   }
@@ -516,8 +535,8 @@ export async function scoreExpansionKeywords(
 ): Promise<ScoredKeyword[]> {
   const config: PipelineScoringConfig = {
     runId,
-    customWeights: settings?.scoring_weights,
-    quickWinThreshold: settings?.quick_win_threshold || 0.7,
+    customWeights: (settings as any)?.scoringWeights,
+    quickWinThreshold: (settings as any)?.quickWinThreshold || 0.7,
     enableSeasonalAdjustments: false,
     performanceMode: 'quality',
     enableAnalytics: true
@@ -561,4 +580,5 @@ export async function quickScore(
   return ScoringPipeline.scoreKeywords(keywords, config);
 }
 
-export { ScoringPipeline };
+export const ScoringPipeline = ScoringPipelineImpl;
+export { ScoringPipelineImpl };

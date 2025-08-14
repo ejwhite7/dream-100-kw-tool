@@ -39,7 +39,22 @@ export class AlertManager {
     const ruleIndex = this.rules.findIndex(r => r.id === ruleId);
     if (ruleIndex === -1) return false;
     
-    this.rules[ruleIndex] = { ...this.rules[ruleIndex], ...updates };
+    const currentRule = this.rules[ruleIndex];
+    if (!currentRule) return false;
+    
+    const updatedRule: AlertRule = {
+      id: currentRule.id,
+      name: updates.name ?? currentRule.name,
+      metric: updates.metric ?? currentRule.metric,
+      condition: updates.condition ?? currentRule.condition,
+      threshold: updates.threshold ?? currentRule.threshold,
+      severity: updates.severity ?? currentRule.severity,
+      enabled: updates.enabled ?? currentRule.enabled,
+      cooldown: updates.cooldown ?? currentRule.cooldown,
+      channels: updates.channels ?? currentRule.channels,
+      description: updates.description ?? currentRule.description
+    };
+    this.rules[ruleIndex] = updatedRule;
     return true;
   }
 

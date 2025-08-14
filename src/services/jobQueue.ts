@@ -45,6 +45,7 @@ import type { RunStatus } from '../types/database';
 /**
  * Job types for different pipeline stages
  */
+// Legacy JobType for backwards compatibility
 export type JobType = 
   | 'expansion' 
   | 'universe' 
@@ -53,6 +54,28 @@ export type JobType =
   | 'roadmap' 
   | 'export'
   | 'cleanup';
+
+// Mapping between legacy JobType and ProcessingStage
+export const JOB_TYPE_TO_STAGE: Record<JobType, ProcessingStage> = {
+  'expansion': 'expansion',
+  'universe': 'universe',
+  'clustering': 'clustering',
+  'scoring': 'scoring',
+  'roadmap': 'roadmap',
+  'export': 'export',
+  'cleanup': 'cleanup'
+};
+
+export const STAGE_TO_JOB_TYPE: Record<ProcessingStage, JobType> = {
+  'initialization': 'expansion', // closest match
+  'expansion': 'expansion',
+  'universe': 'universe',
+  'clustering': 'clustering',
+  'scoring': 'scoring',
+  'roadmap': 'roadmap',
+  'export': 'export',
+  'cleanup': 'cleanup'
+};
 
 /**
  * Job priority levels
@@ -74,7 +97,6 @@ export interface QueueConfig {
     password?: string;
     db?: number;
     maxRetriesPerRequest?: number;
-    retryDelayOnFailover?: number;
     connectTimeout?: number;
     commandTimeout?: number;
   };
@@ -172,7 +194,6 @@ export class JobQueueService extends EventEmitter {
     this.redis = new IORedis({
       ...config.redis,
       maxRetriesPerRequest: config.redis.maxRetriesPerRequest ?? 3,
-      retryDelayOnFailover: config.redis.retryDelayOnFailover ?? 100,
       connectTimeout: config.redis.connectTimeout ?? 10000,
       commandTimeout: config.redis.commandTimeout ?? 5000,
     });
@@ -262,7 +283,7 @@ export class JobQueueService extends EventEmitter {
    * Setup workers for processing jobs
    */
   private async setupWorkers(): Promise<void> {
-    for (const [type, queue] of this.queues) {
+    for (const [type, queue] of Array.from(this.queues.entries())) {
       const queueConfig = this.config.queues[type];
       
       const worker = new Worker(
@@ -299,7 +320,7 @@ export class JobQueueService extends EventEmitter {
    * Setup queue events for monitoring
    */
   private async setupQueueEvents(): Promise<void> {
-    for (const [type, queue] of this.queues) {
+    for (const [type, queue] of Array.from(this.queues.entries())) {
       const queueEvents = new QueueEvents(queue.name, {
         connection: this.redis,
       });
@@ -449,34 +470,48 @@ export class JobQueueService extends EventEmitter {
    * Process expansion job (Dream 100 generation)
    */
   private async processExpansionJob(job: Job, metrics: JobMetrics): Promise<any> {
-    const { ExpansionService } = await import('./expansion');
-    const expansionService = new ExpansionService();
+    const { Dream100ExpansionService } = await import('./expansion');
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY!;
+    const ahrefsApiKey = process.env.AHREFS_API_KEY!;
+    const expansionService = new Dream100ExpansionService(anthropicApiKey, ahrefsApiKey);
     
     const { seedKeywords, runId, settings } = job.data as any;
     
     await job.updateProgress({
-      stage: 'expansion',
+      stage: 'dream100_generation' as ProcessingStage,
       stepName: 'LLM Expansion',
       current: 0,
       total: 100,
       percentage: 0,
       message: 'Expanding seed keywords with LLM',
-    } as JobProgress);
-
-    const result = await expansionService.expandToDream100({
-      seedKeywords,
-      runId,
-      settings,
-      onProgress: async (progress) => {
-        await job.updateProgress(progress);
-        metrics.itemsProcessed = progress.current;
-      },
-      onApiCall: (service, cost) => {
-        metrics.apiCalls[service as keyof typeof metrics.apiCalls]++;
-        metrics.costs[service as keyof typeof metrics.costs] += cost;
-        metrics.costs.total += cost;
-      },
     });
+
+    const request: any = {
+      runId,
+      seedKeywords,
+      targetCount: settings?.maxDream100 || 100,
+      market: settings?.market || 'US',
+      industry: settings?.industry,
+      intentFocus: 'mixed',
+      difficultyPreference: settings?.difficultyPreference || 'mixed',
+      budgetLimit: settings?.budgetLimit,
+      qualityThreshold: 0.7
+    };
+
+    const result = await expansionService.expandToDream100(
+      request,
+      async (progress) => {
+        await job.updateProgress({
+          stage: progress.stage as ProcessingStage,
+          stepName: progress.currentStep,
+          current: progress.keywordsProcessed,
+          total: request.targetCount || 100,
+          percentage: progress.progressPercent,
+          message: `Processing: ${progress.currentStep}`,
+        } as JobProgress);
+        metrics.itemsProcessed = progress.keywordsProcessed;
+      }
+    );
 
     return result;
   }
@@ -485,34 +520,51 @@ export class JobQueueService extends EventEmitter {
    * Process universe expansion job (Tier 2 & 3 generation)
    */
   private async processUniverseJob(job: Job, metrics: JobMetrics): Promise<any> {
-    const { UniverseService } = await import('./universe');
-    const universeService = new UniverseService();
+    const { UniverseExpansionService } = await import('./universe');
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY!;
+    const ahrefsApiKey = process.env.AHREFS_API_KEY!;
+    const universeService = new UniverseExpansionService(anthropicApiKey, ahrefsApiKey);
     
     const { dreamKeywords, runId, settings } = job.data as any;
     
     await job.updateProgress({
-      stage: 'universe',
+      stage: 'universe' as ProcessingStage,
       stepName: 'Universe Expansion',
       current: 0,
       total: 100,
       percentage: 0,
       message: 'Expanding Dream 100 to full universe',
-    } as JobProgress);
-
-    const result = await universeService.expandUniverse({
-      dreamKeywords,
-      runId,
-      settings,
-      onProgress: async (progress) => {
-        await job.updateProgress(progress);
-        metrics.itemsProcessed = progress.current;
-      },
-      onApiCall: (service, cost) => {
-        metrics.apiCalls[service as keyof typeof metrics.apiCalls]++;
-        metrics.costs[service as keyof typeof metrics.costs] += cost;
-        metrics.costs.total += cost;
-      },
     });
+
+    const request: any = {
+      runId,
+      dream100Keywords: dreamKeywords,
+      targetTotalCount: settings?.maxTotalKeywords || 10000,
+      maxTier2PerDream: settings?.maxTier2PerDream || 10,
+      maxTier3PerTier2: settings?.maxTier3PerTier2 || 10,
+      market: settings?.market || 'US',
+      industry: settings?.industry,
+      budgetLimit: settings?.budgetLimit,
+      qualityThreshold: 0.6,
+      enableCompetitorMining: true,
+      enableSerpAnalysis: true,
+      enableSemanticVariations: true
+    };
+
+    const result = await universeService.expandToUniverse(
+      request,
+      async (progress) => {
+        await job.updateProgress({
+          stage: progress.stage as ProcessingStage,
+          stepName: progress.currentStep,
+          current: progress.keywordsProcessed,
+          total: request.targetTotalCount || 10000,
+          percentage: progress.progressPercent,
+          message: `Processing: ${progress.currentStep}`,
+        } as JobProgress);
+        metrics.itemsProcessed = progress.keywordsProcessed;
+      }
+    );
 
     return result;
   }
@@ -522,7 +574,9 @@ export class JobQueueService extends EventEmitter {
    */
   private async processClusteringJob(job: Job, metrics: JobMetrics): Promise<any> {
     const { ClusteringService } = await import('./clustering');
-    const clusteringService = new ClusteringService();
+    const openaiApiKey = process.env.OPENAI_API_KEY!;
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY!;
+    const clusteringService = new ClusteringService(openaiApiKey, anthropicApiKey);
     
     const { keywords, runId, settings } = job.data as any;
     
@@ -535,15 +589,30 @@ export class JobQueueService extends EventEmitter {
       message: 'Clustering keywords semantically',
     } as JobProgress);
 
-    const result = await clusteringService.clusterKeywords({
+    const result = await clusteringService.clusterKeywords(
       keywords,
-      runId,
-      settings,
-      onProgress: async (progress) => {
-        await job.updateProgress(progress);
-        metrics.itemsProcessed = progress.current;
+      {
+        method: settings?.clusteringMethod || 'hybrid',
+        minClusterSize: settings?.minClusterSize || 3,
+        maxClusterSize: settings?.maxClusterSize || 50,
+        similarityThreshold: settings?.similarityThreshold || 0.7,
+        intentWeight: settings?.intentWeight || 0.3,
+        semanticWeight: settings?.semanticWeight || 0.7,
+        maxClusters: settings?.maxClusters || 50,
+        outlierThreshold: settings?.outlierThreshold || 0.5,
       },
-    });
+      async (progress) => {
+        await job.updateProgress({
+          stage: 'clustering',
+          stepName: progress.currentOperation || 'Clustering keywords',
+          current: progress.processed || 0,
+          total: progress.total || keywords.length,
+          percentage: progress.percentComplete || 0,
+          message: `${progress.stage}: ${progress.currentOperation}`,
+        } as JobProgress);
+        metrics.itemsProcessed = progress.processed || 0;
+      }
+    );
 
     return result;
   }
@@ -569,12 +638,14 @@ export class JobQueueService extends EventEmitter {
     const result = await scoringService.scoreKeywords({
       keywords,
       runId,
-      settings,
-      onProgress: async (progress) => {
-        await job.updateProgress(progress);
-        metrics.itemsProcessed = progress.current;
-      },
+      settings: {
+        weights: settings?.scoringWeights,
+        quickWinThreshold: settings?.quickWinThreshold || 0.7,
+        enableSeasonalAdjustments: false,
+      }
     });
+    
+    metrics.itemsProcessed = keywords.length;
 
     return result;
   }
@@ -583,29 +654,56 @@ export class JobQueueService extends EventEmitter {
    * Process roadmap generation job
    */
   private async processRoadmapJob(job: Job, metrics: JobMetrics): Promise<any> {
-    const { RoadmapService } = await import('./roadmap');
-    const roadmapService = new RoadmapService();
+    const { RoadmapGenerationService } = await import('./roadmap');
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY!;
+    const config = {
+      anthropicApiKey,
+      defaultPostsPerMonth: 20,
+      defaultDuration: 6,
+      maxConcurrentTitleGeneration: 10,
+      bufferDays: 1,
+      holidayDates: [],
+      workingDays: [1, 2, 3, 4, 5] // Monday to Friday
+    };
+    const roadmapService = new RoadmapGenerationService(config);
     
     const { clusters, runId, settings } = job.data as any;
     
     await job.updateProgress({
-      stage: 'roadmap',
+      stage: 'roadmap' as ProcessingStage,
       stepName: 'Editorial Roadmap',
       current: 0,
       total: 100,
       percentage: 0,
       message: 'Generating editorial roadmap',
-    } as JobProgress);
-
-    const result = await roadmapService.generateRoadmap({
-      clusters,
-      runId,
-      settings,
-      onProgress: async (progress) => {
-        await job.updateProgress(progress);
-        metrics.itemsProcessed = progress.current;
-      },
     });
+
+    const roadmapConfig: any = {
+      postsPerMonth: settings?.postsPerMonth || 20,
+      startDate: new Date().toISOString().split('T')[0],
+      duration: settings?.duration || 6,
+      pillarRatio: 0.3,
+      quickWinPriority: true,
+      teamMembers: settings?.teamMembers || [],
+      contentTypes: settings?.contentTypes || []
+    };
+
+    const result = await roadmapService.generateRoadmap(
+      runId,
+      clusters,
+      roadmapConfig,
+      (progress) => {
+        job.updateProgress({
+          stage: progress.stage as ProcessingStage,
+          stepName: progress.currentStep,
+          current: progress.completedSteps,
+          total: progress.totalSteps,
+          percentage: (progress.completedSteps / progress.totalSteps) * 100,
+          message: `${progress.stage}: ${progress.currentStep}`,
+        } as JobProgress);
+        metrics.itemsProcessed = progress.completedSteps;
+      }
+    );
 
     return result;
   }
@@ -656,11 +754,12 @@ export class JobQueueService extends EventEmitter {
     const jobIds: string[] = [];
 
     try {
-      // Add expansion job (starts immediately)
+      // Add expansion job (starts immediately)  
       const expansionJobId = await this.addJob('expansion', {
-        stage: 'expansion',
-        input: { seedKeywords, runId, settings },
-      }, { priority });
+        seedKeywords,
+        runId,
+        settings,
+      } as any, { priority });
       jobIds.push(expansionJobId);
 
       // Note: Subsequent jobs will be added by the pipeline orchestrator
@@ -832,17 +931,17 @@ export class JobQueueService extends EventEmitter {
     }
 
     // Close workers
-    for (const worker of this.workers.values()) {
+    for (const worker of Array.from(this.workers.values())) {
       await worker.close();
     }
 
     // Close queue events
-    for (const queueEvents of this.queueEvents.values()) {
+    for (const queueEvents of Array.from(this.queueEvents.values())) {
       await queueEvents.close();
     }
 
     // Close queues
-    for (const queue of this.queues.values()) {
+    for (const queue of Array.from(this.queues.values())) {
       await queue.close();
     }
 
@@ -863,7 +962,6 @@ export const defaultQueueConfig: QueueConfig = {
     password: process.env.REDIS_PASSWORD,
     db: parseInt(process.env.REDIS_DB || '0'),
     maxRetriesPerRequest: 3,
-    retryDelayOnFailover: 100,
     connectTimeout: 10000,
     commandTimeout: 5000,
   },

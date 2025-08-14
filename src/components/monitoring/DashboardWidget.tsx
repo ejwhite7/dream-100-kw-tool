@@ -1,16 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-
-// JSX namespace declaration
-declare global {
-  namespace JSX {
-    interface Element {}
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
+import { useState, useEffect } from 'react';
+import type { ReactElement } from 'react';
 import { performanceMonitor } from '../../lib/monitoring';
 import { 
   ChartBarIcon, 
@@ -57,7 +48,7 @@ interface DashboardData {
   }>;
 }
 
-export function MonitoringDashboard(): JSX.Element {
+export function MonitoringDashboard(): ReactElement {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(30000);
@@ -193,7 +184,7 @@ export function MonitoringDashboard(): JSX.Element {
   );
 }
 
-function AlertBanner({ alerts }: { alerts: Array<{ id: string; severity: string; message: string; timestamp: number }> }): JSX.Element {
+function AlertBanner({ alerts }: { alerts: Array<{ id: string; severity: string; message: string; timestamp: number }> }): ReactElement {
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
   const warningAlerts = alerts.filter(a => a.severity === 'warning');
 
@@ -249,7 +240,7 @@ function AlertBanner({ alerts }: { alerts: Array<{ id: string; severity: string;
   );
 }
 
-function WebVitalsWidget({ vitals }: { vitals: any }): JSX.Element {
+function WebVitalsWidget({ vitals }: { vitals: any }): ReactElement {
   const getScoreColor = (metric: string, value: number) => {
     const thresholds = {
       LCP: { good: 2500, fair: 4000 },
@@ -310,7 +301,7 @@ function WebVitalsWidget({ vitals }: { vitals: any }): JSX.Element {
   );
 }
 
-function ApiMetricsWidget({ metrics }: { metrics: any }): JSX.Element {
+function ApiMetricsWidget({ metrics }: { metrics: any }): ReactElement {
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex items-center justify-between mb-4">
@@ -351,7 +342,7 @@ function ApiMetricsWidget({ metrics }: { metrics: any }): JSX.Element {
   );
 }
 
-function SystemHealthWidget({ health }: { health: any }): JSX.Element {
+function SystemHealthWidget({ health }: { health: any }): ReactElement {
   const formatUptime = (uptime: number) => {
     const hours = Math.floor(uptime / (1000 * 60 * 60));
     const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
@@ -396,7 +387,7 @@ function SystemHealthWidget({ health }: { health: any }): JSX.Element {
   );
 }
 
-function BusinessMetricsWidget({ metrics }: { metrics: any }): JSX.Element {
+function BusinessMetricsWidget({ metrics }: { metrics: any }): ReactElement {
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex items-center justify-between mb-4">
@@ -431,7 +422,7 @@ function BusinessMetricsWidget({ metrics }: { metrics: any }): JSX.Element {
   );
 }
 
-function CostOverviewWidget({ cost }: { cost: number }): JSX.Element {
+function CostOverviewWidget({ cost }: { cost: number }): ReactElement {
   const dailyBudget = 50; // Example daily budget
   const utilization = (cost / dailyBudget) * 100;
 
@@ -469,7 +460,7 @@ function CostOverviewWidget({ cost }: { cost: number }): JSX.Element {
   );
 }
 
-function PerformanceTrendChart(): JSX.Element {
+function PerformanceTrendChart(): ReactElement {
   // Simplified chart component - would integrate with actual charting library
   return (
     <div className="h-64 flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg">
@@ -482,7 +473,7 @@ function PerformanceTrendChart(): JSX.Element {
   );
 }
 
-function ErrorAnalysisChart({ errorRate }: { errorRate: number }): JSX.Element {
+function ErrorAnalysisChart({ errorRate }: { errorRate: number }): ReactElement {
   return (
     <div className="h-64 flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg">
       <div className="text-center">

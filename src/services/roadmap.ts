@@ -37,6 +37,7 @@ import type {
   Timestamp,
   KeywordString
 } from '../models';
+import type { ProcessingStage } from '../models/pipeline';
 import type {
   KeywordIntent,
   RoadmapStage
@@ -152,11 +153,7 @@ export class RoadmapGenerationService {
   ) {
     this.config = config;
     this.anthropicClient = anthropicClient || new AnthropicClient(config.anthropicApiKey);
-    this.errorHandler = new ErrorHandler({
-      context: 'RoadmapGenerationService',
-      enableRetry: true,
-      maxRetries: 3
-    });
+    this.errorHandler = new ErrorHandler();
   }
 
   /**
@@ -260,7 +257,7 @@ export class RoadmapGenerationService {
       return roadmap;
 
     } catch (error) {
-      const roadmapError = this.errorHandler.handleError(error, 'generateRoadmap', { runId });
+      const roadmapError = ErrorHandler.handleSystemError(error as Error, { component: 'RoadmapGenerationService', operation: 'generateRoadmap', details: { runId } });
       Sentry.captureException(roadmapError);
       throw roadmapError;
     }
@@ -553,27 +550,31 @@ export class RoadmapGenerationService {
     
     const response = await this.anthropicClient.generateTitles({
       keyword: item.primaryKeyword.toString(),
-      intent: item.intent,
-      volume: item.volume,
-      difficulty: item.difficulty,
-      contentType: this.inferContentType(item),
-      competitors: (item.sourceUrls || []).slice(0, 3),
-      count: 5
+      intent: item.intent ?? 'informational',
+      content_type: this.inferContentType(item),
+      tone: 'professional',
+      max_length: 60,
+      include_keyword: true
     });
 
-    if (!response.success || !response.data?.titles.length) {
-      throw new Error(`Title generation failed: ${response.error?.message || 'Unknown error'}`);
+    const errorMessage = 'error' in response ? (response.error as any)?.message || '' : '';
+    const success = 'success' in response ? response.success : 'data' in response;
+    const titles = 'data' in response && response.data?.titles ? response.data.titles : [];
+
+    if (!success || !titles.length) {
+      throw new Error(`Title generation failed: ${errorMessage || 'Unknown error'}`);
     }
 
-    const titles = response.data.titles;
-    const selectedTitle = this.selectBestTitle(titles, item);
+    const titleStrings = titles.map((t: any) => typeof t === 'string' ? t : t.title || String(t));
+    const selectedTitle = this.selectBestTitle(titleStrings, item);
+    const confidence = 'data' in response && response.data ? (response.data as any).confidence || 0.8 : 0.8;
 
     return {
       postId: item.postId,
       primaryKeyword: item.primaryKeyword.toString(),
-      suggestedTitles: titles,
+      suggestedTitles: titleStrings,
       selectedTitle,
-      confidence: response.data.confidence || 0.8
+      confidence
     };
   }
 
@@ -752,20 +753,19 @@ export class RoadmapGenerationService {
     - Make compelling and action-oriented`;
   }
 
-  private inferContentType(item: RoadmapItemWithCluster): string {
+  private inferContentType(item: RoadmapItemWithCluster): 'blog_post' | 'landing_page' | 'product_page' | 'guide' | 'comparison' {
     const keyword = item.primaryKeyword.toString().toLowerCase();
     
-    if (item.stage === 'pillar') return 'Comprehensive Guide';
-    if (item.intent === 'transactional') return 'Landing Page';
+    if (item.stage === 'pillar') return 'guide';
+    if (item.intent === 'transactional') return 'landing_page';
     if (item.intent === 'commercial') {
-      if (keyword.includes('vs') || keyword.includes('compare')) return 'Comparison';
-      if (keyword.includes('best') || keyword.includes('top')) return 'Listicle';
-      return 'Buying Guide';
+      if (keyword.includes('vs') || keyword.includes('compare')) return 'comparison';
+      if (keyword.includes('product')) return 'product_page';
+      return 'guide';
     }
-    if (keyword.includes('how') || keyword.includes('guide')) return 'How-to Guide';
-    if (keyword.includes('what') || keyword.includes('why')) return 'Explainer';
+    if (keyword.includes('how') || keyword.includes('guide')) return 'guide';
     
-    return 'Blog Post';
+    return 'blog_post';
   }
 
   private getIntentContext(intent: KeywordIntent | null): string {
@@ -805,9 +805,11 @@ export class RoadmapGenerationService {
     const keyword = item.primaryKeyword.toString();
     const contentType = this.inferContentType(item);
     
-    if (contentType === 'How-to Guide') return `How to ${keyword}`;
-    if (contentType === 'Listicle') return `Top 10 ${keyword} Tips`;
-    if (contentType === 'Comparison') return `${keyword}: Complete Comparison`;
+    if (contentType === 'guide') return `How to ${keyword}`;
+    if (contentType === 'blog_post') return `${keyword}: Complete Guide`;
+    if (contentType === 'comparison') return `${keyword}: Complete Comparison`;
+    if (contentType === 'product_page') return `${keyword} - Product Overview`;
+    if (contentType === 'landing_page') return `Get ${keyword} - Convert Now`;
     
     return `Complete Guide to ${keyword}`;
   }
@@ -874,7 +876,8 @@ ${brief.requiredResources.map(resource => `• ${resource}`).join('\n')}`;
   ) {
     const dates = items
       .filter(item => item.dueDate)
-      .map(item => item.dueDate!)
+      .map(item => item.dueDate || '')
+      .filter(date => date.length > 0)
       .sort();
 
     const startDate = dates.length > 0 ? dates[0] : config.startDate;
@@ -1024,7 +1027,7 @@ ${brief.requiredResources.map(resource => `• ${resource}`).join('\n')}`;
     options: ExportOptions = {
       includeMetadata: true,
       includeAnalytics: false,
-      sortBy: 'dueDate',
+      sortBy: 'date',
       sortDirection: 'asc',
       formatting: {
         dateFormat: 'US',
@@ -1081,4 +1084,15 @@ ${brief.requiredResources.map(resource => `• ${resource}`).join('\n')}`;
   }
 }
 
+// Explicit service class export
+// RoadmapGenerationService already exported above
+
+// Also export as EditorialRoadmapService for consistency
+export const EditorialRoadmapService = RoadmapGenerationService;
+export type EditorialRoadmapService = RoadmapGenerationService;
+
 export default RoadmapGenerationService;
+
+// Alias for backwards compatibility
+export const RoadmapService = RoadmapGenerationService;
+export type RoadmapService = RoadmapGenerationService;

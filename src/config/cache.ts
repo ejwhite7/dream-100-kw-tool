@@ -12,7 +12,6 @@ const developmentConfig: CacheConfig = {
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD,
     db: parseInt(process.env.REDIS_DB || '0'),
-    retryDelayOnFailover: 1000,
     maxRetriesPerRequest: 3,
     lazyConnect: true,
     keepAlive: 30000,
@@ -47,13 +46,14 @@ const productionConfig: CacheConfig = {
       options: {
         redisOptions: {
           password: process.env.REDIS_PASSWORD,
-          retryDelayOnFailover: 1000,
           maxRetriesPerRequest: 3,
           lazyConnect: true,
           keepAlive: 30000,
           connectTimeout: 10000,
           commandTimeout: 5000,
-        },
+        } as RedisOptions,
+        retryDelayOnClusterDown: 1000,
+        retryDelayOnFailover: 1000,
         enableOfflineQueue: false,
         slotsRefreshTimeout: 10000,
         maxRetriesPerRequest: 3,
@@ -65,7 +65,6 @@ const productionConfig: CacheConfig = {
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD,
     db: parseInt(process.env.REDIS_DB || '0'),
-    retryDelayOnFailover: 1000,
     maxRetriesPerRequest: 3,
     lazyConnect: true,
     keepAlive: 30000,
@@ -73,7 +72,6 @@ const productionConfig: CacheConfig = {
     commandTimeout: 5000,
     // Connection pooling for production
     family: 4,
-    maxLoadingTimeout: 5000,
   } as RedisOptions,
   defaultTtl: 30 * 24 * 60 * 60 * 1000, // 30 days
   compression: {

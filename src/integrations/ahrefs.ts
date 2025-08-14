@@ -8,7 +8,8 @@ import {
   AhrefsCompetitorRequest,
   AhrefsKeywordIdeasRequest,
   AhrefsResponse,
-  AhrefsKeywordBatch
+  AhrefsKeywordBatch,
+  AhrefsGenericResponse
 } from '../types/ahrefs';
 import { ApiResponse, ApiClientConfig } from '../types/api';
 import { ErrorHandler, RetryHandler } from '../utils/error-handler';
@@ -115,11 +116,12 @@ export class AhrefsClient extends BaseApiClient {
               retryAfter: retryAfter ? parseInt(retryAfter) : 60
             };
             
-            throw ErrorHandler.createRateLimitError(rateLimitInfo, 'ahrefs', errorMessage);
+            throw (ErrorHandler as any).createRateLimitError(rateLimitInfo, 'ahrefs', errorMessage);
           }
           
         } catch (parseError) {
           // If we can't parse the error, use the original message
+          console.warn('Failed to parse error response:', parseError);
         }
         
         throw new Error(errorMessage);
@@ -138,6 +140,9 @@ export class AhrefsClient extends BaseApiClient {
         data: data as T,
         success: true,
         metadata: {
+          requestId: `ahrefs_${Date.now()}`,
+          timestamp: Date.now(),
+          cached: false,
           quota: quotaInfo
         }
       } as ApiResponse<T>;
@@ -145,11 +150,11 @@ export class AhrefsClient extends BaseApiClient {
     } catch (error) {
       clearTimeout(timeoutId);
       
-      if (error.name === 'AbortError') {
-        throw ErrorHandler.createTimeoutError(options.timeout, 'ahrefs');
+      if ((error as Error).name === 'AbortError') {
+        throw (ErrorHandler as any).createTimeoutError(options.timeout, 'ahrefs');
       }
       
-      throw error;
+      throw error as Error;
     }
   }
   
@@ -233,17 +238,17 @@ export class AhrefsClient extends BaseApiClient {
     request: AhrefsKeywordIdeasRequest
   ): Promise<ApiResponse<AhrefsKeywordIdeas>> {
     const {
-      seed_keywords,
+      target,
       country = 'US',
       limit = 1000,
       mode = 'phrase_match'
     } = request;
     
-    if (seed_keywords.length === 0) {
-      throw new Error('At least one seed keyword is required');
+    if (!target) {
+      throw new Error('Target keyword is required');
     }
     
-    const cacheKey = `ideas:${mode}:${country}:${limit}:${seed_keywords.sort().join(',')}`;
+    const cacheKey = `ideas:${mode}:${country}:${limit}:${target}`;
     const cost = limit * this.costPerRequest * 0.5; // Ideas cost less than metrics
     
     const endpoint = '/v2/keywords-explorer/keyword-ideas';
@@ -252,7 +257,7 @@ export class AhrefsClient extends BaseApiClient {
       () => this.makeRequest<AhrefsKeywordIdeas>(endpoint, {
         method: 'POST',
         body: {
-          seed_keywords,
+          target,
           country,
           limit,
           mode,
@@ -272,7 +277,7 @@ export class AhrefsClient extends BaseApiClient {
           Sentry.addBreadcrumb({
             message: `Retrying Ahrefs keyword ideas (attempt ${attempt})`,
             level: 'warning',
-            data: { seedCount: seed_keywords.length, limit, error: error.message }
+            data: { target, limit, error: error.message }
           });
         }
       }
@@ -379,7 +384,7 @@ export class AhrefsClient extends BaseApiClient {
           extra: { keywords: batch }
         });
         
-        console.warn(`Batch ${i + 1}/${batches.length} failed:`, error.message);
+        console.warn(`Batch ${i + 1}/${batches.length} failed:`, (error as Error).message);
         // Continue with other batches
       }
     }
@@ -441,5 +446,14 @@ export class AhrefsClient extends BaseApiClient {
       chunks.push(array.slice(i, i + chunkSize));
     }
     return chunks;
+  }
+
+  // Backward compatibility alias for cache adapters
+  async getSerpOverview(
+    keyword: string,
+    market: string = 'US',
+    device: 'desktop' | 'mobile' = 'desktop'
+  ): Promise<ApiResponse<AhrefsKeywordOverview>> {
+    return this.getKeywordOverview(keyword, market);
   }
 }

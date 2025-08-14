@@ -203,14 +203,14 @@ export const KeywordIntentSchema = z.enum(['transactional', 'commercial', 'infor
 
 export const CreateKeywordInputSchema = z.object({
   runId: z.string().uuid(),
-  keyword: z.string().min(1).max(255).transform(val => val.trim().toLowerCase()),
+  keyword: z.string().min(1).max(255).transform(val => val.trim().toLowerCase() as KeywordString),
   stage: KeywordStageSchema,
   volume: z.number().int().min(0).max(10000000).optional(),
   difficulty: z.number().int().min(0).max(100).optional(),
   intent: KeywordIntentSchema.optional(),
   relevance: z.number().min(0).max(1).optional(),
   trend: z.number().min(-1).max(1).optional(),
-  canonicalKeyword: z.string().min(1).max(255).optional(),
+  canonicalKeyword: z.string().min(1).max(255).transform(val => val.trim().toLowerCase() as KeywordString).optional(),
   topSerpUrls: z.array(z.string().url()).max(10).optional()
 });
 
@@ -223,7 +223,7 @@ export const UpdateKeywordInputSchema = z.object({
   trend: z.number().min(-1).max(1).optional(),
   blendedScore: z.number().min(0).max(1).optional(),
   quickWin: z.boolean().optional(),
-  canonicalKeyword: z.string().min(1).max(255).nullable().optional(),
+  canonicalKeyword: z.string().min(1).max(255).transform(val => val.trim().toLowerCase() as KeywordString).nullable().optional(),
   topSerpUrls: z.array(z.string().url()).max(10).nullable().optional(),
   embedding: z.array(z.number()).max(1536).nullable().optional() // OpenAI embedding size
 });

@@ -139,7 +139,7 @@ function setupGlobalErrorHandlers(monitoring: MonitoringSystem): void {
     // Global error handler
     const originalErrorHandler = window.onerror;
     window.onerror = (message, source, lineno, colno, error) => {
-      monitoring.errorTracker.captureError(error || message, {
+      monitoring.errorTracker.captureError(error || new Error(String(message)), {
         source,
         lineno,
         colno,
@@ -155,7 +155,7 @@ function setupGlobalErrorHandlers(monitoring: MonitoringSystem): void {
 
     // Unhandled promise rejection handler
     const originalRejectionHandler = window.onunhandledrejection;
-    window.onunhandledrejection = (event) => {
+    const rejectionHandler = (event: PromiseRejectionEvent) => {
       monitoring.errorTracker.captureError(event.reason, {
         type: 'unhandledrejection',
         promise: event.promise
@@ -163,9 +163,10 @@ function setupGlobalErrorHandlers(monitoring: MonitoringSystem): void {
       
       // Call original handler if it exists
       if (originalRejectionHandler) {
-        return originalRejectionHandler(event);
+        return originalRejectionHandler.call(window, event);
       }
     };
+    window.addEventListener('unhandledrejection', rejectionHandler);
   }
   
   // Node.js environment
@@ -210,6 +211,12 @@ function initializeSentry(config: MonitoringConfig): void {
 function createFallbackMonitoring(config: MonitoringConfig): MonitoringSystem {
   // Create minimal monitoring system that won't break the application
   const noopAlertManager = {
+    config: {} as MonitoringConfig,
+    rules: new Map(),
+    activeAlerts: new Map(),
+    alertStates: new Map(),
+    channels: new Map(),
+    rateState: new Map(),
     addRule: () => {},
     updateRule: () => false,
     removeRule: () => false,
@@ -219,10 +226,22 @@ function createFallbackMonitoring(config: MonitoringConfig): MonitoringSystem {
     getActiveAlerts: () => [],
     getAlertHistory: () => [],
     getAlertStats: () => ({ total: 0, bySeverity: {}, byType: {}, avgResolutionTime: 0, unresolvedCount: 0 }),
-    cleanup: () => {}
-  } as AlertManager;
+    cleanup: () => {},
+    checkCooldown: () => true,
+    updateAlertState: () => {},
+    sendAlert: () => Promise.resolve(),
+    formatAlert: () => ({ title: '', message: '', fields: [] }),
+    sendSlackAlert: () => Promise.resolve(),
+    sendEmailAlert: () => Promise.resolve(),
+    sendPagerDutyAlert: () => Promise.resolve()
+  } as unknown as AlertManager;
 
   const noopErrorTracker = {
+    config: {} as MonitoringConfig,
+    alertManager: {} as AlertManager,
+    errorQueue: [],
+    errorCounts: new Map(),
+    lastFlush: new Date(),
     captureError: () => 'fallback_error',
     captureException: () => 'fallback_error',
     captureMessage: () => 'fallback_error',
@@ -231,8 +250,17 @@ function createFallbackMonitoring(config: MonitoringConfig): MonitoringSystem {
     addBreadcrumb: () => {},
     startTransaction: () => null,
     capturePerformanceIssue: () => {},
-    getErrorStats: () => ({ total: 0, byService: {}, bySeverity: {}, topErrors: [] })
-  } as ErrorTracker;
+    getErrorStats: () => ({ total: 0, byService: {}, byseverity: {}, topErrors: [] }),
+    initializeErrorCapture: () => {},
+    sendToSentry: () => {},
+    flushErrors: () => {},
+    checkErrorRate: () => {},
+    generateErrorId: () => 'fallback',
+    generateFingerprint: () => 'fallback',
+    filterSensitiveData: (e: any) => e,
+    mapLevelToSeverity: () => 'medium' as const,
+    mapSeverityToSentryLevel: () => 'error' as const
+  } as unknown as ErrorTracker;
 
   // Create other minimal components...
   const fallbackComponents = {

@@ -133,17 +133,36 @@ export class PipelineOrchestrator extends EventEmitter {
   private jobQueue: JobQueueService;
   private activeExecutions: Map<UUID, PipelineExecution> = new Map();
   private stageWeights: Record<ProcessingStage, number> = {
-    expansion: 0.20,
-    universe: 0.40,
-    clustering: 0.20,
-    scoring: 0.15,
-    roadmap: 0.05,
+    'initialization': 0.05,
+    'expansion': 0.40,
+    'universe': 0.25,
+    'clustering': 0.15,
+    'scoring': 0.08,
+    'roadmap': 0.05,
+    'export': 0.02,
+    'cleanup': 0.00
   };
 
   constructor(jobQueue: JobQueueService) {
     super();
     this.jobQueue = jobQueue;
     this.setupJobQueueListeners();
+  }
+
+  /**
+   * Map JobType to ProcessingStage
+   */
+  private mapJobTypeToStage(type: JobType): ProcessingStage {
+    const mapping: Record<JobType, ProcessingStage> = {
+      'expansion': 'expansion',
+      'universe': 'universe',
+      'clustering': 'clustering', 
+      'scoring': 'scoring',
+      'roadmap': 'roadmap',
+      'export': 'export',
+      'cleanup': 'cleanup'
+    };
+    return mapping[type] || 'initialization';
   }
 
   /**
@@ -190,11 +209,14 @@ export class PipelineOrchestrator extends EventEmitter {
         progress: {
           overall: 0,
           byStage: {
+            initialization: 0,
             expansion: 0,
             universe: 0,
             clustering: 0,
             scoring: 0,
             roadmap: 0,
+            export: 0,
+            cleanup: 0,
           },
         },
         metrics: {
@@ -207,11 +229,14 @@ export class PipelineOrchestrator extends EventEmitter {
             total: 0,
           },
           processingTimes: {
+            initialization: 0,
             expansion: 0,
             universe: 0,
             clustering: 0,
             scoring: 0,
             roadmap: 0,
+            export: 0,
+            cleanup: 0,
           },
         },
         errors: [],
@@ -235,15 +260,44 @@ export class PipelineOrchestrator extends EventEmitter {
           input: {
             runId,
             seedKeywords,
-            settings: {
-              maxDream100: settings.maxDream100,
-              market: settings.market,
-              commercialFocus: settings.commercialFocus,
-              qualityThreshold: settings.qualityThreshold,
-            },
+            settings: Object.fromEntries(
+              Object.entries({
+                maxDream100: settings.maxDream100,
+                market: settings.market,
+                commercialFocus: settings.commercialFocus,
+                qualityThreshold: settings.qualityThreshold,
+              }).filter(([_, value]) => value !== undefined)
+            ) as Record<string, string | number | boolean>,
             userId,
           },
-        },
+          config: {
+            stage: 'expansion',
+            parameters: {},
+            timeoutMinutes: 30,
+            retryStrategy: { 
+              maxRetries: 3, 
+              backoffStrategy: 'exponential',
+              initialDelayMs: 1000,
+              maxDelayMs: 30000,
+              retryableErrors: ['TIMEOUT', 'NETWORK_ERROR']
+            },
+            resourceLimits: { 
+              maxMemory: 2048, 
+              maxCpu: 4, 
+              maxDuration: 60,
+              maxApiCalls: 1000,
+              maxStorage: 1024
+            }
+          },
+          dependencies: [],
+          resources: {
+            memory: 1024,
+            cpu: 2,
+            apiQuota: { anthropic: 10000 },
+            storage: 512,
+            estimatedDuration: 15
+          }
+        } as any,
         {
           priority: JobPriority.HIGH,
           attempts: 3,
@@ -299,8 +353,9 @@ export class PipelineOrchestrator extends EventEmitter {
 
     try {
       // Update execution with completion
-      execution.completedStages.push(type as ProcessingStage);
-      execution.progress.byStage[type as ProcessingStage] = 100;
+      const stage = this.mapJobTypeToStage(type);
+      execution.completedStages.push(stage);
+      execution.progress.byStage[stage] = 100;
       this.updateOverallProgress(execution);
 
       // Update metrics from job result
@@ -322,7 +377,7 @@ export class PipelineOrchestrator extends EventEmitter {
 
     } catch (error) {
       console.error(`Failed to handle job completion for ${jobId}:`, error);
-      await this.handlePipelineError(execution, type as ProcessingStage, error);
+      await this.handlePipelineError(execution, this.mapJobTypeToStage(type), error);
     }
   }
 
@@ -350,17 +405,46 @@ export class PipelineOrchestrator extends EventEmitter {
             input: {
               runId,
               dreamKeywords: result.dreamKeywords,
-              settings: {
-                maxTier2PerDream: settings.maxTier2PerDream,
-                maxTier3PerTier2: settings.maxTier3PerTier2,
-                maxTotalKeywords: settings.maxTotalKeywords,
-                enableCompetitorAnalysis: settings.enableCompetitorAnalysis,
-                enableSerpScraping: settings.enableSerpScraping,
-                market: settings.market,
-                qualityThreshold: settings.qualityThreshold,
-              },
+              settings: Object.fromEntries(
+                Object.entries({
+                  maxTier2PerDream: settings.maxTier2PerDream,
+                  maxTier3PerTier2: settings.maxTier3PerTier2,
+                  maxTotalKeywords: settings.maxTotalKeywords,
+                  enableCompetitorAnalysis: settings.enableCompetitorAnalysis,
+                  enableSerpScraping: settings.enableSerpScraping,
+                  market: settings.market,
+                  qualityThreshold: settings.qualityThreshold,
+                }).filter(([_, value]) => value !== undefined)
+              ) as Record<string, string | number | boolean>,
             },
-          },
+            config: {
+              stage: 'universe',
+              parameters: {},
+              timeoutMinutes: 45,
+              retryStrategy: { 
+                maxRetries: 3, 
+                backoffStrategy: 'exponential',
+                initialDelayMs: 1000,
+                maxDelayMs: 30000,
+                retryableErrors: ['TIMEOUT', 'NETWORK_ERROR']
+              },
+              resourceLimits: { 
+                maxMemory: 2048, 
+                maxCpu: 4, 
+                maxDuration: 90,
+                maxApiCalls: 5000,
+                maxStorage: 2048
+              }
+            },
+            dependencies: [],
+            resources: {
+              memory: 1536,
+              cpu: 3,
+              apiQuota: { anthropic: 20000, ahrefs: 5000 },
+              storage: 1024,
+              estimatedDuration: 30
+            }
+          } as any,
           { priority: JobPriority.HIGH, attempts: 3 }
         );
         execution.jobIds.universe = nextJobId;
@@ -376,13 +460,42 @@ export class PipelineOrchestrator extends EventEmitter {
             input: {
               runId,
               keywords: result.allKeywords,
-              settings: {
-                similarityThreshold: settings.similarityThreshold,
-                targetClusterCount: settings.targetClusterCount,
-                enableIntentGrouping: settings.enableIntentGrouping,
-              },
+              settings: Object.fromEntries(
+                Object.entries({
+                  similarityThreshold: settings.similarityThreshold,
+                  targetClusterCount: settings.targetClusterCount,
+                  enableIntentGrouping: settings.enableIntentGrouping,
+                }).filter(([_, value]) => value !== undefined)
+              ) as Record<string, number | boolean>,
             },
-          },
+            config: {
+              stage: 'clustering',
+              parameters: {},
+              timeoutMinutes: 30,
+              retryStrategy: { 
+                maxRetries: 2, 
+                backoffStrategy: 'exponential',
+                initialDelayMs: 1000,
+                maxDelayMs: 15000,
+                retryableErrors: ['TIMEOUT']
+              },
+              resourceLimits: { 
+                maxMemory: 4096, 
+                maxCpu: 6, 
+                maxDuration: 45,
+                maxApiCalls: 0,
+                maxStorage: 1024
+              }
+            },
+            dependencies: [],
+            resources: {
+              memory: 2048,
+              cpu: 4,
+              apiQuota: {},
+              storage: 512,
+              estimatedDuration: 20
+            }
+          } as any,
           { priority: JobPriority.MEDIUM, attempts: 2 }
         );
         execution.jobIds.clustering = nextJobId;
@@ -398,14 +511,41 @@ export class PipelineOrchestrator extends EventEmitter {
             stage: 'scoring',
             input: {
               runId,
-              keywords: allKeywords,
+              keywords: allKeywords as any[],
               settings: {
                 quickWinThreshold: settings.quickWinThreshold,
                 enableNormalization: settings.enableNormalization,
                 customScoringWeights: settings.customScoringWeights,
               },
             },
-          },
+            config: {
+              stage: 'scoring',
+              parameters: {},
+              timeoutMinutes: 20,
+              retryStrategy: { 
+                maxRetries: 2, 
+                backoffStrategy: 'exponential',
+                initialDelayMs: 1000,
+                maxDelayMs: 10000,
+                retryableErrors: ['TIMEOUT']
+              },
+              resourceLimits: { 
+                maxMemory: 2048, 
+                maxCpu: 4, 
+                maxDuration: 30,
+                maxApiCalls: 0,
+                maxStorage: 512
+              }
+            },
+            dependencies: [],
+            resources: {
+              memory: 1024,
+              cpu: 2,
+              apiQuota: {},
+              storage: 256,
+              estimatedDuration: 15
+            }
+          } as any,
           { priority: JobPriority.MEDIUM, attempts: 2 }
         );
         execution.jobIds.scoring = nextJobId;
@@ -427,9 +567,36 @@ export class PipelineOrchestrator extends EventEmitter {
                 contentStrategy: settings.contentStrategy,
                 startDate: settings.startDate,
                 endDate: settings.endDate,
-              },
+              } as any,
             },
-          },
+            config: {
+              stage: 'roadmap',
+              parameters: {},
+              timeoutMinutes: 15,
+              retryStrategy: { 
+                maxRetries: 2, 
+                backoffStrategy: 'linear',
+                initialDelayMs: 1000,
+                maxDelayMs: 5000,
+                retryableErrors: ['TIMEOUT']
+              },
+              resourceLimits: { 
+                maxMemory: 1024, 
+                maxCpu: 2, 
+                maxDuration: 20,
+                maxApiCalls: 100,
+                maxStorage: 256
+              }
+            },
+            dependencies: [],
+            resources: {
+              memory: 512,
+              cpu: 1,
+              apiQuota: { anthropic: 5000 },
+              storage: 128,
+              estimatedDuration: 10
+            }
+          } as any,
           { priority: JobPriority.MEDIUM, attempts: 2 }
         );
         execution.jobIds.roadmap = nextJobId;
@@ -473,7 +640,7 @@ export class PipelineOrchestrator extends EventEmitter {
       return;
     }
 
-    await this.handlePipelineError(execution, type as ProcessingStage, error);
+    await this.handlePipelineError(execution, this.mapJobTypeToStage(type), error);
   }
 
   /**
@@ -537,16 +704,17 @@ export class PipelineOrchestrator extends EventEmitter {
     const execution = this.findExecutionByJobId(jobId);
     if (!execution) return;
 
-    // Update stage progress
-    execution.progress.byStage[type as ProcessingStage] = progress.percentage;
+    // Update stage progress - use progress or percentage field
+    const progressValue = progress.percentage ?? progress.progress;
+    execution.progress.byStage[type as ProcessingStage] = progressValue;
     this.updateOverallProgress(execution);
 
     // Update metrics if available
     if (progress.metadata) {
-      if (progress.metadata.keywordsDiscovered) {
+      if (typeof progress.metadata.keywordsDiscovered === 'number') {
         execution.metrics.keywordsDiscovered = progress.metadata.keywordsDiscovered;
       }
-      if (progress.metadata.clustersCreated) {
+      if (typeof progress.metadata.clustersCreated === 'number') {
         execution.metrics.clustersCreated = progress.metadata.clustersCreated;
       }
     }
@@ -554,7 +722,7 @@ export class PipelineOrchestrator extends EventEmitter {
     this.emit('progressUpdate', { execution, stage: type, progress });
     
     // Update database with throttling
-    if (Math.floor(progress.percentage) % 10 === 0) {
+    if (Math.floor(progressValue) % 10 === 0) {
       await this.updateRunInDatabase(execution);
     }
   }
@@ -673,12 +841,21 @@ export class PipelineOrchestrator extends EventEmitter {
    * Update overall progress based on stage progress
    */
   private updateOverallProgress(execution: PipelineExecution): void {
-    const stages: ProcessingStage[] = ['expansion', 'universe', 'clustering', 'scoring', 'roadmap'];
+    const stages: ProcessingStage[] = [
+      'initialization',
+      'expansion',
+      'universe',
+      'clustering',
+      'scoring',
+      'roadmap',
+      'export',
+      'cleanup'
+    ];
     let totalProgress = 0;
 
     for (const stage of stages) {
-      const stageWeight = this.stageWeights[stage];
-      const stageProgress = execution.progress.byStage[stage] || 0;
+      const stageWeight = this.stageWeights[stage] || 0;
+      const stageProgress = execution.progress.byStage[stage as keyof typeof execution.progress.byStage] || 0;
       totalProgress += (stageProgress / 100) * stageWeight;
     }
 
@@ -879,7 +1056,34 @@ export class PipelineOrchestrator extends EventEmitter {
         {
           stage: 'cleanup',
           input: { runId },
-        },
+          config: {
+            stage: 'cleanup',
+            parameters: {},
+            timeoutMinutes: 5,
+            retryStrategy: { 
+              maxRetries: 1, 
+              backoffStrategy: 'linear',
+              initialDelayMs: 1000,
+              maxDelayMs: 5000,
+              retryableErrors: []
+            },
+            resourceLimits: { 
+              maxMemory: 512, 
+              maxCpu: 1, 
+              maxDuration: 5,
+              maxApiCalls: 0,
+              maxStorage: 0
+            }
+          },
+          dependencies: [],
+          resources: {
+            memory: 256,
+            cpu: 1,
+            apiQuota: {},
+            storage: 0,
+            estimatedDuration: 2
+          }
+        } as any,
         {
           priority: JobPriority.LOW,
           delay: 3600000, // 1 hour delay

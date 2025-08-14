@@ -1,12 +1,36 @@
 import { AhrefsClient } from './ahrefs';
 import { CacheFactory, getCacheSystem } from '../lib/cache-init';
 import { CACHE_TTL } from '../lib/cache-integrations';
-import { AhrefsMetrics, AhrefsResponse } from '../types/ahrefs';
+import { 
+  AhrefsMetric,
+  AhrefsResponse,
+  AhrefsKeywordData,
+  AhrefsKeywordOverview,
+  AhrefsCompetitorKeywords,
+  AhrefsKeywordIdeas,
+  AhrefsKeywordRequest,
+  AhrefsKeywordIdeasRequest,
+  AhrefsCompetitorRequest,
+  AhrefsApiQuota,
+  AhrefsMetrics
+} from '../types/ahrefs';
+import { ApiResponse, CostInfo } from '../types/api';
 
 /**
  * Cache-enhanced Ahrefs client that integrates with the comprehensive Redis cache system
  * This adapter wraps the existing AhrefsClient to add advanced caching capabilities
  */
+// Extended metadata interface for cache-specific properties
+interface CachedAhrefsMetadata {
+  fromCache?: number;
+  fromApi?: number;
+  total?: number;
+  cacheHitRate?: number;
+  partialFailure?: boolean;
+  cost?: CostInfo;
+  savings?: CostInfo;
+}
+
 export class CachedAhrefsClient {
   private client: AhrefsClient;
   private cache: ReturnType<typeof CacheFactory.createAhrefsCache> | null = null;
@@ -27,25 +51,31 @@ export class CachedAhrefsClient {
   async getKeywordMetrics(
     keywords: string[],
     market: string = 'US',
-    metrics: AhrefsMetrics[] = ['volume', 'difficulty', 'cpc']
-  ): Promise<AhrefsResponse> {
+    metrics?: AhrefsMetrics
+  ): Promise<ApiResponse<AhrefsKeywordData[]>> {
     if (!this.cache) {
       // Fallback to original client
-      return this.client.getKeywordMetrics(keywords, market, metrics);
+      const request: AhrefsKeywordRequest = {
+        keywords,
+        country: market,
+        mode: 'exact',
+        include_serp: false
+      };
+      return this.client.getKeywordMetrics(request);
     }
     
     try {
       // Check cache for all keywords
       const { cached, missing } = await this.cache.get(keywords, market);
       
-      const results: any[] = [];
+      const results: AhrefsKeywordData[] = [];
       let fromCache = 0;
       let fromApi = 0;
       
       // Add cached results
       for (const keyword of keywords) {
         if (cached[keyword]) {
-          results.push(cached[keyword]);
+          results.push(cached[keyword] as AhrefsKeywordData);
           fromCache++;
         }
       }
@@ -55,7 +85,13 @@ export class CachedAhrefsClient {
         console.log(`Fetching ${missing.length} keywords from Ahrefs API, ${fromCache} from cache`);
         
         try {
-          const apiResponse = await this.client.getKeywordMetrics(missing, market, metrics);
+          const request: AhrefsKeywordRequest = {
+            keywords: missing,
+            country: market,
+            mode: 'exact',
+            include_serp: false
+          };
+          const apiResponse = await this.client.getKeywordMetrics(request);
           
           if (apiResponse.success) {
             // Add API results
@@ -74,11 +110,16 @@ export class CachedAhrefsClient {
               data: results,
               error: fromCache === 0 ? apiResponse.error : undefined,
               metadata: {
-                fromCache,
-                fromApi: 0,
-                total: fromCache,
-                cacheHitRate: fromCache / keywords.length,
-                partialFailure: true,
+                requestId: `ahrefs_cached_${Date.now()}`,
+                timestamp: Date.now(),
+                cached: true,
+                ...({
+              fromCache,
+              fromApi: 0,
+              total: fromCache,
+              cacheHitRate: fromCache / keywords.length,
+              partialFailure: true
+            } as unknown as CachedAhrefsMetadata),
               },
             };
           }
@@ -94,23 +135,44 @@ export class CachedAhrefsClient {
         }
       }
       
+      const costInfo: CostInfo = {
+        credits: fromApi * 0.001,
+        estimatedDollars: fromApi * 0.001
+      };
+      
+      const savingsInfo: CostInfo = {
+        credits: fromCache * 0.001,
+        estimatedDollars: fromCache * 0.001
+      };
+      
       return {
         success: true,
         data: results,
         metadata: {
-          fromCache,
-          fromApi,
-          total: results.length,
-          cacheHitRate: fromCache / keywords.length,
-          cost: fromApi * 0.001, // Estimated cost per keyword
-          savings: fromCache * 0.001, // Estimated savings
+          requestId: `ahrefs_cached_${Date.now()}`,
+          timestamp: Date.now(),
+          cached: fromCache > 0,
+          cost: costInfo,
+          ...({
+            fromCache,
+            fromApi,
+            total: results.length,
+            cacheHitRate: fromCache / keywords.length,
+            savings: savingsInfo
+          } as unknown as CachedAhrefsMetadata),
         },
       };
     } catch (error) {
       console.error('Cached keyword metrics request failed:', error);
       
       // Fallback to original client
-      return this.client.getKeywordMetrics(keywords, market, metrics);
+      const request: AhrefsKeywordRequest = {
+        keywords,
+        country: market,
+        mode: 'exact',
+        include_serp: false
+      };
+      return this.client.getKeywordMetrics(request);
     }
   }
   
@@ -121,7 +183,7 @@ export class CachedAhrefsClient {
     keyword: string,
     market: string = 'US',
     device: 'desktop' | 'mobile' = 'desktop'
-  ): Promise<AhrefsResponse> {
+  ): Promise<ApiResponse<AhrefsKeywordOverview>> {
     const cacheSystem = getCacheSystem();
     if (!cacheSystem) {
       return this.client.getSerpOverview(keyword, market, device);
@@ -135,13 +197,23 @@ export class CachedAhrefsClient {
       
       if (cached) {
         console.log(`SERP data for "${keyword}" served from cache`);
+        const savingsInfo: CostInfo = {
+          credits: 0.005,
+          estimatedDollars: 0.005
+        };
+        
         return {
           success: true,
           data: cached,
           metadata: {
-            fromCache: true,
-            cost: 0,
-            savings: 0.005, // Estimated SERP API cost
+            requestId: `ahrefs_serp_cached_${Date.now()}`,
+            timestamp: Date.now(),
+            cached: true,
+            cost: { credits: 0, estimatedDollars: 0 },
+            ...({
+              fromCache: true,
+              savings: savingsInfo
+            } as unknown as CachedAhrefsMetadata),
           },
         };
       }
@@ -156,12 +228,21 @@ export class CachedAhrefsClient {
         console.log(`Cached SERP data for "${keyword}"`);
       }
       
+      const costInfo: CostInfo = {
+        credits: 0.005,
+        estimatedDollars: 0.005
+      };
+      
       return {
         ...response,
         metadata: {
-          ...response.metadata,
-          fromCache: false,
-          cost: 0.005, // Estimated SERP API cost
+          requestId: response.metadata?.requestId || `ahrefs_serp_${Date.now()}`,
+          timestamp: response.metadata?.timestamp || Date.now(),
+          cached: response.metadata?.cached || false,
+          cost: costInfo,
+          ...({
+            fromCache: false
+          } as unknown as CachedAhrefsMetadata),
         },
       };
     } catch (error) {
@@ -177,10 +258,10 @@ export class CachedAhrefsClient {
     keywordBatches: Array<{
       keywords: string[];
       market: string;
-      metrics: AhrefsMetrics[];
+      metrics: AhrefsMetrics;
     }>
-  ): Promise<Array<AhrefsResponse & { batch: number }>> {
-    const results: Array<AhrefsResponse & { batch: number }> = [];
+  ): Promise<Array<ApiResponse<AhrefsKeywordData[]> & { batch: number }>> {
+    const results: Array<ApiResponse<AhrefsKeywordData[]> & { batch: number }> = [];
     
     for (let i = 0; i < keywordBatches.length; i++) {
       const batch = keywordBatches[i];
@@ -202,6 +283,11 @@ export class CachedAhrefsClient {
           data: [],
           error: error instanceof Error ? error.message : 'Unknown error',
           batch: i,
+          metadata: {
+            requestId: `ahrefs_batch_${i}_${Date.now()}`,
+            timestamp: Date.now(),
+            cached: false
+          }
         });
       }
       
@@ -287,34 +373,42 @@ export class CachedAhrefsClient {
    * Proxy other methods to original client
    */
   async getCompetitorKeywords(
-    domains: string[],
+    domain: string,
     market: string = 'US',
     limit: number = 1000
-  ): Promise<AhrefsResponse> {
+  ): Promise<ApiResponse<AhrefsCompetitorKeywords>> {
     // Could add caching here too, but for now proxy to original
-    return this.client.getCompetitorKeywords(domains, market, limit);
+    const request: AhrefsCompetitorRequest = {
+      domain,
+      country: market,
+      limit,
+      mode: 'exact'
+    };
+    return this.client.getCompetitorKeywords(request);
   }
   
-  async getDomainMetrics(
-    domains: string[],
-    metrics: string[] = ['domain_rating', 'ahrefs_rank', 'organic_keywords']
-  ): Promise<AhrefsResponse> {
-    // Could add caching here too
-    return this.client.getDomainMetrics(domains, metrics);
-  }
+  // getDomainMetrics method not implemented in base client
+  // Would need to be added to AhrefsClient if needed
   
   async getKeywordIdeas(
     seedKeywords: string[],
     market: string = 'US',
     limit: number = 1000
-  ): Promise<AhrefsResponse> {
+  ): Promise<ApiResponse<AhrefsKeywordIdeas>> {
     // Could add caching here too
-    return this.client.getKeywordIdeas(seedKeywords, market, limit);
+    // Use the first seed keyword as target since API changed
+    const request: AhrefsKeywordIdeasRequest = {
+      target: seedKeywords[0] || '',
+      country: market,
+      limit,
+      mode: 'phrase_match'
+    };
+    return this.client.getKeywordIdeas(request);
   }
   
   // Proxy all other methods from the original client
-  getMetrics = this.client.getMetrics?.bind(this.client);
-  healthCheck = this.client.healthCheck?.bind(this.client);
+  getMetrics = () => this.client.getMetrics?.();
+  healthCheck = () => this.client.healthCheck?.();
 }
 
 /**
@@ -376,17 +470,17 @@ export class AhrefsCacheMigration {
     
     // Test original client (be careful not to exhaust API limits)
     const uncachedStart = Date.now();
-    const uncachedResponse = await originalClient.getKeywordMetrics(
-      testKeywords.slice(0, 5), // Limit to 5 keywords for test
-      market
-    );
+    const uncachedResponse = await originalClient.getKeywordMetrics({
+      keywords: testKeywords.slice(0, 5), // Limit to 5 keywords for test
+      country: market
+    });
     const uncachedTime = Date.now() - uncachedStart;
     
     const results = {
       cached: {
         time: cachedTime,
-        cost: cachedResponse.metadata?.cost || 0,
-        fromCache: cachedResponse.metadata?.fromCache || 0,
+        cost: (cachedResponse.metadata as any)?.cost?.estimatedDollars || 0,
+        fromCache: (cachedResponse.metadata as any)?.fromCache || 0,
       },
       uncached: {
         time: uncachedTime,
@@ -394,7 +488,7 @@ export class AhrefsCacheMigration {
       },
       improvement: {
         timeReduction: ((uncachedTime - cachedTime) / uncachedTime) * 100,
-        costSavings: cachedResponse.metadata?.savings || 0,
+        costSavings: (cachedResponse.metadata as any)?.savings?.estimatedDollars || 0,
       },
     };
     

@@ -1,6 +1,6 @@
 // Integration initialization utility for Next.js app
-import { integrations } from '@/integrations';
-import { SentryReporter } from '@/utils/sentry';
+import { integrations } from '../integrations';
+import { SentryReporter } from '../utils/sentry';
 import Redis from 'ioredis';
 import * as Sentry from '@sentry/nextjs';
 
@@ -49,7 +49,7 @@ export async function initializeIntegrations(config?: Partial<IntegrationEnvConf
           enableReadyCheck: true,
           maxRetriesPerRequest: 3,
           lazyConnect: true
-        });
+        } as import('ioredis').RedisOptions);
         
         // Test Redis connection
         await redis.ping();
@@ -73,7 +73,7 @@ export async function initializeIntegrations(config?: Partial<IntegrationEnvConf
         });
         
       } catch (redisError) {
-        console.warn('Redis initialization failed, continuing without Redis:', redisError.message);
+        console.warn('Redis initialization failed, continuing without Redis:', (redisError as Error).message);
         redis = undefined;
       }
     }
@@ -98,16 +98,20 @@ export async function initializeIntegrations(config?: Partial<IntegrationEnvConf
     const health = await integrations.getHealthStatus(false);
     
     console.log('🔍 Integration health check:');
-    Object.entries(health.services).forEach(([service, status]) => {
-      const icon = status.healthy ? '✓' : '✗';
-      console.log(`${icon} ${service}: ${status.healthy ? 'healthy' : 'unhealthy'}`);
-      
-      if (!status.healthy) {
-        console.log(`  Issues: ${status.issues.join(', ')}`);
-      }
-    });
+    if (health && health.services) {
+      Object.entries(health.services).forEach(([service, status]) => {
+        if (status && typeof status === 'object' && 'healthy' in status) {
+          const icon = status.healthy ? '✓' : '✗';
+          console.log(`${icon} ${service}: ${status.healthy ? 'healthy' : 'unhealthy'}`);
+          
+          if (!status.healthy && 'issues' in status && Array.isArray(status.issues)) {
+            console.log(`  Issues: ${status.issues.join(', ')}`);
+          }
+        }
+      });
+    }
     
-    console.log(`📊 Overall status: ${health.overallStatus}`);
+    console.log(`📊 Overall status: ${health?.overallStatus || 'unknown'}`);
     
     // Report initialization to Sentry
     Sentry.addBreadcrumb({
@@ -115,8 +119,8 @@ export async function initializeIntegrations(config?: Partial<IntegrationEnvConf
       level: 'info',
       category: 'initialization',
       data: {
-        services: Object.keys(health.services),
-        overallStatus: health.overallStatus,
+        services: health?.services ? Object.keys(health.services) : [],
+        overallStatus: health?.overallStatus || 'unknown',
         hasRedis: !!redis,
         environment: env.NODE_ENV
       }
@@ -137,7 +141,7 @@ export async function initializeIntegrations(config?: Partial<IntegrationEnvConf
         console.log('✓ Graceful shutdown complete');
         process.exit(0);
       } catch (error) {
-        console.error('Error during shutdown:', error);
+        console.error('Error during shutdown:', (error as Error).message);
         process.exit(1);
       }
     };
@@ -264,7 +268,7 @@ export async function testIntegrations(): Promise<{
     } catch (error) {
       results.ahrefs = {
         status: 'error',
-        error: error.message
+        error: (error as Error).message
       };
     }
   }
@@ -282,7 +286,7 @@ export async function testIntegrations(): Promise<{
     } catch (error) {
       results.anthropic = {
         status: 'error',
-        error: error.message
+        error: (error as Error).message
       };
     }
   }
@@ -298,7 +302,7 @@ export async function testIntegrations(): Promise<{
     } catch (error) {
       results.scraper = {
         status: 'error',
-        error: error.message
+        error: (error as Error).message
       };
     }
   }
@@ -314,7 +318,7 @@ export async function testIntegrations(): Promise<{
     } catch (error) {
       results.redis = {
         status: 'error',
-        error: error.message
+        error: (error as Error).message
       };
     }
   }

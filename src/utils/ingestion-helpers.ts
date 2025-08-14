@@ -25,6 +25,7 @@ export function normalizeKeyword(keyword: string): KeywordString {
 export function validateKeywordQuality(keyword: string): {
   isValid: boolean;
   reasons: string[];
+  score: number;
 } {
   const reasons: string[] = [];
   const normalized = keyword.trim();
@@ -67,9 +68,31 @@ export function validateKeywordQuality(keyword: string): {
     }
   }
   
+  // Calculate score based on validity and quality factors
+  let score = 0.5; // Base score
+  
+  if (reasons.length === 0) {
+    score = 0.9; // High score for valid keywords
+  } else {
+    // Reduce score based on number of issues
+    score = Math.max(0.1, 0.9 - (reasons.length * 0.2));
+  }
+  
+  // Bonus for good length
+  if (normalized.length >= 10 && normalized.length <= 50) {
+    score += 0.05;
+  }
+  
+  // Bonus for multiple words (reuse wordCount from above)
+  // const wordCount = normalized.split(/\s+/).length; // Already calculated above
+  if (wordCount >= 2 && wordCount <= 5) {
+    score += 0.05;
+  }
+  
   return {
     isValid: reasons.length === 0,
-    reasons
+    reasons,
+    score: Math.min(1.0, Math.max(0.0, score))
   };
 }
 

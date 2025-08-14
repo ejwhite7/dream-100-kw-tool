@@ -5,17 +5,37 @@
  * API key management, cost estimation, and error handling.
  */
 
-import { IngestionService, processIngestion } from '../ingestion';
-import type { IngestionRequest, IngestionResponse } from '../ingestion';
-import { DatabaseService } from '../../lib/supabase';
+import { describe, it, expect, beforeEach, afterEach, jest, beforeAll } from '@jest/globals';
+import type { MockedFunction } from 'jest-mock';
+import { IngestionService } from '../ingestion';
+import { DatabaseService } from '../../lib/database-service';
 import { IntegrationFactory } from '../../integrations';
-import { ErrorHandler } from '../../utils/error-handler';
 
-// Mock external dependencies
+// Mock external dependencies first
 jest.mock('../../lib/supabase');
 jest.mock('../../integrations');
 jest.mock('../../utils/error-handler');
 jest.mock('@sentry/nextjs');
+jest.mock('../../lib/database-service');
+
+// Define processIngestion helper function
+const processIngestion = (request: any) => {
+  return IngestionService.getInstance().processIngestion(request);
+};
+
+// Type definitions for tests
+interface IngestionRequest {
+  userId: string;
+  seedKeywords: string[];
+  market: string;
+  budgetLimit?: number;
+}
+
+interface IngestionResponse {
+  success: boolean;
+  data: any;
+  error?: string;
+}
 
 describe('IngestionService', () => {
   let ingestionService: IngestionService;

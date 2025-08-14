@@ -7,8 +7,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export default async function globalTeardown() {
   console.log('\n🧹 Cleaning up Dream 100 Keyword Engine test environment...\n');
@@ -81,7 +81,6 @@ async function cleanupTestCache(): Promise<void> {
     console.log('🔴 Cleaning up test cache...');
     
     const redis = new Redis(process.env.REDIS_URL!, {
-      retryDelayOnFailover: 100,
       enableReadyCheck: false,
       lazyConnect: true
     });

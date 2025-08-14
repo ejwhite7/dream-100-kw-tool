@@ -231,8 +231,9 @@ export class KeywordProvider {
    */
   async getProviderStatus(): Promise<ProviderHealth[]> {
     const statuses: ProviderHealth[] = [];
+    const providerEntries = Array.from(this.providers.entries());
 
-    for (const [name, client] of this.providers) {
+    for (const [name, client] of providerEntries) {
       try {
         const startTime = Date.now();
         const health = await client.getAPIHealth();

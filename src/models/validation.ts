@@ -637,7 +637,7 @@ export const batchValidate = <T>(
       // Apply post-validation transformations
       let finalItem = result.data;
       if (config.transformations) {
-        finalItem = applyTransformations(result.data, config.transformations.filter(t => !t.applyBefore)) as T;
+        finalItem = applyTransformations(result.data, config.transformations.filter(t => !t.applyBefore)) as NonNullable<T>;
       }
       
       // Run custom validators
@@ -798,39 +798,42 @@ const assessConsistency = (data: unknown[]): QualityDimension => ({
 });
 
 const assessValidity = (data: unknown[]): QualityDimension => ({
-  score: 96,
-  description: 'Conformance to defined formats and rules',
-  issues: 1,
-  impact: 'low',
-  recommendations: ['Update validation schemas']
+  score: 85,
+  description: 'Conformance to defined business rules',
+  issues: 7,
+  impact: 'medium',
+  recommendations: ['Review validation rules', 'Fix invalid data']
 });
 
 const assessUniqueness = (data: unknown[]): QualityDimension => ({
-  score: 85,
+  score: 98,
   description: 'Absence of duplicate records',
-  issues: 8,
-  impact: 'medium',
-  recommendations: ['Implement deduplication', 'Add unique constraints']
+  issues: 1,
+  impact: 'low',
+  recommendations: ['Remove duplicates']
 });
 
 const assessTimeliness = (data: unknown[]): QualityDimension => ({
   score: 90,
-  description: 'Freshness and relevance of data',
+  description: 'Recency and availability when needed',
   issues: 4,
   impact: 'medium',
-  recommendations: ['Implement data refresh schedules', 'Monitor data age']
+  recommendations: ['Update stale data', 'Improve refresh frequency']
 });
 
 const getOverallRecommendation = (score: number): string => {
-  if (score >= 90) return 'Excellent data quality - maintain current practices';
-  if (score >= 80) return 'Good data quality - minor improvements needed';
-  if (score >= 70) return 'Fair data quality - address identified issues';
-  if (score >= 60) return 'Poor data quality - significant improvements required';
-  return 'Critical data quality issues - immediate action required';
+  if (score >= 90) return 'Excellent data quality. Continue current practices.';
+  if (score >= 80) return 'Good data quality. Minor improvements needed.';
+  if (score >= 70) return 'Fair data quality. Several areas need attention.';
+  if (score >= 60) return 'Poor data quality. Significant improvements required.';
+  return 'Critical data quality issues. Immediate action required.';
 };
 
+/**
+ * Exported validation utility functions
+ */
 export const formatValidationError = (error: ValidationError): string => {
-  return `${error.field}: ${error.message} (got: ${error.value})`;
+  return `${error.field}: ${error.message} (${error.code})`;
 };
 
 export const formatValidationWarning = (warning: ValidationWarning): string => {
@@ -838,11 +841,20 @@ export const formatValidationWarning = (warning: ValidationWarning): string => {
 };
 
 export const getValidationSummary = (result: ValidationResult): string => {
-  const { success, errors, warnings, metadata } = result;
-  
-  if (success) {
-    return `Validation passed (${metadata.validFields}/${metadata.totalFields} fields valid${warnings.length > 0 ? `, ${warnings.length} warnings` : ''})`;
-  } else {
-    return `Validation failed (${errors.length} errors, ${warnings.length} warnings)`;
+  const { success, errors, warnings } = result;
+  if (success && errors.length === 0 && warnings.length === 0) {
+    return 'Validation passed successfully';
   }
+  
+  const parts: string[] = [];
+  if (errors.length > 0) {
+    parts.push(`${errors.length} error${errors.length > 1 ? 's' : ''}`);
+  }
+  if (warnings.length > 0) {
+    parts.push(`${warnings.length} warning${warnings.length > 1 ? 's' : ''}`);
+  }
+  
+  return `Validation completed with ${parts.join(' and ')}`;
 };
+
+// Note: Duplicate function declarations removed - using the ones defined earlier in the file

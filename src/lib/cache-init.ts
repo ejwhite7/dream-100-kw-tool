@@ -170,7 +170,7 @@ export async function initializeCacheSystem(config: CacheSystemConfig = {}): Pro
         // Try to get existing client instances (would be provided by dependency injection)
         // For now, we'll pass undefined and let warming handle missing clients gracefully
       } catch (error) {
-        console.warn('Could not initialize API clients for cache warming:', error);
+        console.warn('Could not initialize API clients for cache warming:', (error as Error).message);
       }
       
       warming = new CacheWarmingManager(
@@ -224,7 +224,7 @@ export async function initializeCacheSystem(config: CacheSystemConfig = {}): Pro
         });
         console.log('Initial cache warming completed');
       } catch (error) {
-        console.warn('Initial cache warming failed:', error);
+        console.warn('Initial cache warming failed:', (error as Error).message);
       }
     }
     
@@ -473,7 +473,7 @@ export class CacheMigrationUtils {
     let failed = 0;
     const errors: string[] = [];
     
-    for (const [key, entry] of baseClientCacheMap.entries()) {
+    for (const [key, entry] of Array.from(baseClientCacheMap.entries())) {
       try {
         const ttl = entry.timestamp + entry.ttl - Date.now();
         if (ttl > 0) {
@@ -486,7 +486,7 @@ export class CacheMigrationUtils {
         }
       } catch (error) {
         failed++;
-        errors.push(`Failed to migrate key ${key}: ${error.message}`);
+        errors.push(`Failed to migrate key ${key}: ${(error as Error).message}`);
       }
     }
     

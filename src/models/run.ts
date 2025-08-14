@@ -131,21 +131,35 @@ export interface StageProgress {
 }
 
 /**
+ * Job progress tracking for individual pipeline jobs
+ */
+export interface JobProgress {
+  readonly jobId: UUID;
+  readonly runId: UUID;
+  readonly stage: ProcessingStage;
+  readonly status: 'pending' | 'processing' | 'completed' | 'failed';
+  readonly progress: number; // 0-100
+  readonly itemsProcessed: number;
+  readonly totalItems: number;
+  readonly startedAt: Timestamp | null;
+  readonly estimatedCompletionAt: Timestamp | null;
+  readonly message?: string;
+  readonly error?: string;
+}
+
+/**
  * Processing stages in the pipeline
+ * These map to both the actual processing stages and legacy job types
  */
 export type ProcessingStage = 
   | 'initialization'
-  | 'dream100_generation'
-  | 'tier2_expansion'
-  | 'tier3_expansion'
-  | 'metrics_enrichment'
-  | 'competitor_discovery'
-  | 'content_scraping'
-  | 'semantic_clustering'
-  | 'scoring_calculation'
-  | 'roadmap_generation'
-  | 'export_preparation'
-  | 'finalization';
+  | 'expansion'
+  | 'universe'
+  | 'clustering'
+  | 'scoring'
+  | 'roadmap'
+  | 'export'
+  | 'cleanup';
 
 /**
  * Run creation input
@@ -287,17 +301,13 @@ export interface RunExportConfig {
  */
 export const ProcessingStageSchema = z.enum([
   'initialization',
-  'dream100_generation', 
-  'tier2_expansion',
-  'tier3_expansion',
-  'metrics_enrichment',
-  'competitor_discovery',
-  'content_scraping',
-  'semantic_clustering',
-  'scoring_calculation',
-  'roadmap_generation',
-  'export_preparation',
-  'finalization'
+  'expansion',
+  'universe',
+  'clustering',
+  'scoring',
+  'roadmap',
+  'export',
+  'cleanup'
 ]);
 
 export const RunSettingsSchema = z.object({
@@ -406,10 +416,8 @@ export const isRunStatus = (value: unknown): value is RunStatus => {
 
 export const isProcessingStage = (value: unknown): value is ProcessingStage => {
   return typeof value === 'string' && [
-    'initialization', 'dream100_generation', 'tier2_expansion', 'tier3_expansion',
-    'metrics_enrichment', 'competitor_discovery', 'content_scraping',
-    'semantic_clustering', 'scoring_calculation', 'roadmap_generation',
-    'export_preparation', 'finalization'
+    'initialization', 'expansion', 'universe', 'clustering',
+    'scoring', 'roadmap', 'export', 'cleanup'
   ].includes(value);
 };
 
@@ -472,25 +480,19 @@ export const getDefaultRunSettings = (): RunSettings => ({
 
 export const calculateRunProgress = (stageProgress: Record<ProcessingStage, StageProgress>): number => {
   const stages: ProcessingStage[] = [
-    'initialization', 'dream100_generation', 'tier2_expansion', 'tier3_expansion',
-    'metrics_enrichment', 'competitor_discovery', 'content_scraping',
-    'semantic_clustering', 'scoring_calculation', 'roadmap_generation',
-    'export_preparation', 'finalization'
+    'initialization', 'expansion', 'universe', 'clustering',
+    'scoring', 'roadmap', 'export', 'cleanup'
   ];
   
   const stageWeights: Record<ProcessingStage, number> = {
     'initialization': 5,
-    'dream100_generation': 10,
-    'tier2_expansion': 15,
-    'tier3_expansion': 15,
-    'metrics_enrichment': 20,
-    'competitor_discovery': 10,
-    'content_scraping': 10,
-    'semantic_clustering': 10,
-    'scoring_calculation': 3,
-    'roadmap_generation': 1,
-    'export_preparation': 1,
-    'finalization': 0
+    'expansion': 25,
+    'universe': 35,
+    'clustering': 15,
+    'scoring': 10,
+    'roadmap': 8,
+    'export': 2,
+    'cleanup': 0
   };
   
   const totalWeight = Object.values(stageWeights).reduce((sum, weight) => sum + weight, 0);
@@ -512,9 +514,7 @@ export const estimateRemainingTime = (progress: RunProgress): number => {
   const { currentStage, stageProgress, throughput } = progress;
   
   const remainingStages: ProcessingStage[] = [
-    'tier2_expansion', 'tier3_expansion', 'metrics_enrichment',
-    'competitor_discovery', 'content_scraping', 'semantic_clustering',
-    'scoring_calculation', 'roadmap_generation', 'export_preparation', 'finalization'
+    'expansion', 'universe', 'clustering', 'scoring', 'roadmap', 'export', 'cleanup'
   ];
   
   const currentStageIndex = remainingStages.indexOf(currentStage);
@@ -535,17 +535,13 @@ export const estimateRemainingTime = (progress: RunProgress): number => {
   // Time for upcoming stages (rough estimates)
   const stageEstimates: Record<ProcessingStage, number> = {
     'initialization': 1,
-    'dream100_generation': 3,
-    'tier2_expansion': 5,
-    'tier3_expansion': 8,
-    'metrics_enrichment': 10,
-    'competitor_discovery': 4,
-    'content_scraping': 6,
-    'semantic_clustering': 3,
-    'scoring_calculation': 1,
-    'roadmap_generation': 1,
-    'export_preparation': 1,
-    'finalization': 0
+    'expansion': 5,
+    'universe': 12,
+    'clustering': 8,
+    'scoring': 3,
+    'roadmap': 2,
+    'export': 1,
+    'cleanup': 0
   };
   
   upcomingStages.forEach(stage => {
@@ -569,17 +565,13 @@ export const getRunStatusColor = (status: RunStatus): string => {
 export const getStageDisplayName = (stage: ProcessingStage): string => {
   const displayNames: Record<ProcessingStage, string> = {
     'initialization': 'Initializing',
-    'dream100_generation': 'Generating Dream 100',
-    'tier2_expansion': 'Expanding Tier 2 Keywords',
-    'tier3_expansion': 'Expanding Tier 3 Keywords',
-    'metrics_enrichment': 'Enriching with Metrics',
-    'competitor_discovery': 'Discovering Competitors',
-    'content_scraping': 'Scraping Content',
-    'semantic_clustering': 'Clustering Keywords',
-    'scoring_calculation': 'Calculating Scores',
-    'roadmap_generation': 'Generating Roadmap',
-    'export_preparation': 'Preparing Exports',
-    'finalization': 'Finalizing'
+    'expansion': 'Expanding Keywords',
+    'universe': 'Building Universe',
+    'clustering': 'Clustering Keywords',
+    'scoring': 'Scoring Keywords',
+    'roadmap': 'Generating Roadmap',
+    'export': 'Preparing Export',
+    'cleanup': 'Finalizing'
   };
   
   return displayNames[stage] || stage;

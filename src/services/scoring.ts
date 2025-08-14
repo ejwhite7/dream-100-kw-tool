@@ -22,18 +22,34 @@ import {
   ScoringComparison,
   getDefaultScoringWeights,
   ScoringInputSchema,
-  BatchScoringConfigSchema,
-  type KeywordStage,
-  type KeywordIntent
+  BatchScoringConfigSchema
 } from '../models/scoring';
+import type { KeywordStage, KeywordIntent } from '../types/database';
 import { 
   Keyword, 
   ClusterWithKeywords,
   type UUID 
 } from '../models';
+import type { ProcessingStage } from '../models/pipeline';
 import { CircuitBreaker } from '../utils/circuit-breaker';
-import { RateLimiter } from '../utils/rate-limiter';
-import { logger } from '../utils/sentry';
+import { TokenBucket, RateLimiterFactory, type RateLimiter } from '../utils/rate-limiter';
+import * as Sentry from '@sentry/nextjs';
+
+// Create a simple logger for this service
+const logger = {
+  debug: (message: string, data?: any) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug(`[ScoringEngine] ${message}`, data);
+    }
+  },
+  info: (message: string, data?: any) => {
+    console.log(`[ScoringEngine] ${message}`, data);
+  },
+  error: (message: string, data?: any) => {
+    console.error(`[ScoringEngine] ${message}`, data);
+    Sentry.captureMessage(`ScoringEngine: ${message}`, 'error');
+  }
+};
 
 /**
  * Stage-specific scoring configuration
@@ -80,15 +96,16 @@ export class ScoringEngine {
   private scoringHistory: ScoringAnalytics[] = [];
 
   constructor() {
-    this.circuitBreaker = new CircuitBreaker('scoring-engine', {
-      threshold: 5,
-      timeout: 30000,
-      resetTimeout: 60000
-    });
+    this.circuitBreaker = new CircuitBreaker({
+      failureThreshold: 5,
+      recoveryTimeout: 60000,
+      monitoringPeriod: 30000
+    }, 'scoring-engine');
     
-    this.rateLimiter = new RateLimiter({
-      windowMs: 60000, // 1 minute
-      maxRequests: 1000 // max 1000 scoring operations per minute
+    this.rateLimiter = RateLimiterFactory.createTokenBucket({
+      capacity: 1000,
+      refillRate: 1000,
+      refillPeriod: 60000 // 1 minute
     });
 
     this.defaultWeights = getDefaultScoringWeights();
@@ -210,7 +227,9 @@ export class ScoringEngine {
 
     try {
       // Apply rate limiting
-      await this.rateLimiter.checkLimit('scoring-request');
+      if (!this.rateLimiter.tryConsume(1)) {
+        throw new Error('Rate limit exceeded for scoring operations');
+      }
 
       // Calculate normalized component scores
       const componentScores = await this.calculateComponentScores(
@@ -273,7 +292,7 @@ export class ScoringEngine {
       logger.error('Error calculating score', {
         keyword: validatedInput.keyword,
         stage: validatedInput.stage,
-        error: error.message
+        error: (error as Error).message
       });
       throw error;
     }
@@ -316,7 +335,7 @@ export class ScoringEngine {
         // Apply seasonal adjustments if configured
         let finalResults = results;
         if (validatedConfig.applySeasonalAdjustments && validatedConfig.seasonalFactors) {
-          finalResults = this.applySeasonalAdjustments(results, validatedConfig.seasonalFactors);
+          finalResults = this.applySeasonalAdjustments(results, validatedConfig.seasonalFactors as SeasonalFactor[]);
         }
 
         // Sort by blended score (descending)
@@ -330,7 +349,7 @@ export class ScoringEngine {
           keywords: validatedConfig.keywords.length,
           scoringTime,
           results: finalResults,
-          config: validatedConfig
+          config: validatedConfig as BatchScoringConfig
         });
 
         logger.info('Batch scoring completed', {
@@ -344,7 +363,7 @@ export class ScoringEngine {
       } catch (error) {
         logger.error('Batch scoring failed', {
           keywordCount: validatedConfig.keywords.length,
-          error: error.message
+          error: (error as Error).message
         });
         throw error;
       }
@@ -918,19 +937,19 @@ export class ScoringEngine {
   private normalizeWeights(weights: ScoringWeights): ScoringWeights {
     const normalized = { ...weights };
 
-    (['dream100', 'tier2', 'tier3'] as KeywordStage[]).forEach(stage => {
-      const stageWeights = normalized[stage];
-      const sum = Object.values(stageWeights).reduce((s, w) => s + w, 0);
+    (['dream100', 'tier2', 'tier3'] as const).forEach((stage: KeywordStage) => {
+      const stageWeights = (normalized as any)[stage] as StageWeights;
+      const sum = Object.values(stageWeights).reduce((s: number, w: number) => s + w, 0);
       
       if (Math.abs(sum - 1) > 0.01) {
         const factor = 1 / sum;
-        normalized[stage] = {
+        (normalized as any)[stage] = {
           volume: stageWeights.volume * factor,
           intent: stageWeights.intent * factor,
           relevance: stageWeights.relevance * factor,
           trend: stageWeights.trend * factor,
           ease: stageWeights.ease * factor
-        };
+        } as StageWeights;
       }
     });
 
@@ -1127,3 +1146,267 @@ export const getScoringPresets = (): Record<string, ScoringWeights> => ({
     tier3: { ease: 0.30, relevance: 0.35, volume: 0.20, intent: 0.10, trend: 0.05 }
   }
 });
+
+/**
+ * Scoring Service - Wrapper around ScoringEngine for service layer consistency
+ */
+export class KeywordScoringService {
+  private readonly engine: ScoringEngine;
+
+  constructor() {
+    this.engine = scoringEngine;
+  }
+
+  /**
+   * Score a single keyword
+   */
+  async scoreKeyword(
+    keyword: Keyword,
+    weights?: ScoringWeights
+  ): Promise<ScoringResult> {
+    const input: ScoringInput = {
+      keyword: keyword.keyword,
+      stage: keyword.stage,
+      volume: keyword.volume || 0,
+      difficulty: keyword.difficulty || 0,
+      intent: keyword.intent || 'informational',
+      relevance: keyword.relevance || 0.5,
+      trend: keyword.trend || 0
+    };
+
+    return this.engine.calculateScore(input, weights);
+  }
+
+  /**
+   * Batch score multiple keywords
+   */
+  async batchScore(
+    keywords: Keyword[],
+    options?: {
+      weights?: ScoringWeights;
+      quickWinThreshold?: number;
+      enableSeasonalAdjustments?: boolean;
+      seasonalFactors?: SeasonalFactor[];
+    }
+  ): Promise<ScoringResult[]> {
+    // Convert keywords to batch config format
+    const config: BatchScoringConfig = {
+      keywords: keywords.map(k => ({
+        keyword: k.keyword,
+        stage: k.stage,
+        volume: k.volume,
+        difficulty: k.difficulty,
+        intent: k.intent,
+        relevance: k.relevance || 0.5,
+        trend: k.trend || 0
+      })),
+      weights: options?.weights || getDefaultScoringWeights(),
+      normalizationMethod: 'min-max',
+      applySeasonalAdjustments: options?.enableSeasonalAdjustments || false,
+      seasonalFactors: options?.seasonalFactors || [],
+      quickWinThreshold: options?.quickWinThreshold || 0.7
+    };
+    
+    return this.engine.batchScore(config);
+  }
+
+  /**
+   * Get scoring presets for different industries
+   */
+  getPresets(): Record<string, ScoringWeights> {
+    return getScoringPresets();
+  }
+
+  /**
+   * Detect quick wins from scoring results
+   */
+  detectQuickWins(
+    results: ScoringResult[],
+    threshold?: number
+  ): ScoringResult[] {
+    return detectQuickWins(results, threshold);
+  }
+
+  /**
+   * Score keywords with progress tracking for pipeline integration
+   */
+  async scoreKeywords(
+    request: {
+      keywords: Keyword[];
+      runId: UUID;
+      settings?: {
+        weights?: ScoringWeights;
+        quickWinThreshold?: number;
+        enableSeasonalAdjustments?: boolean;
+        seasonalFactors?: SeasonalFactor[];
+      };
+    },
+    onProgress?: (progress: {
+      stage: ProcessingStage;
+      stepName: string;
+      current: number;
+      total: number;
+      percentage: number;
+      message?: string;
+    }) => Promise<void>
+  ): Promise<{
+    scoredKeywords: ScoringResult[];
+    analytics: ScoringAnalytics;
+    quickWins: ScoringResult[];
+  }> {
+    const { keywords, settings } = request;
+    const startTime = Date.now();
+
+    if (onProgress) {
+      await onProgress({
+        stage: 'scoring',
+        stepName: 'Initializing scoring',
+        current: 0,
+        total: keywords.length,
+        percentage: 0,
+        message: `Preparing to score ${keywords.length} keywords`
+      });
+    }
+
+    // Convert keywords to scoring inputs
+    const scoringInputs: ScoringInput[] = keywords.map(keyword => ({
+      keyword: keyword.keyword,
+      stage: keyword.stage,
+      volume: keyword.volume || 0,
+      difficulty: keyword.difficulty || 0,
+      intent: keyword.intent || 'informational',
+      relevance: keyword.relevance || 0.5,
+      trend: keyword.trend || 0
+    }));
+
+    if (onProgress) {
+      await onProgress({
+        stage: 'scoring',
+        stepName: 'Calculating scores',
+        current: 0,
+        total: keywords.length,
+        percentage: 10,
+        message: 'Running blended scoring algorithm'
+      });
+    }
+
+    // Create batch scoring configuration
+    const config: BatchScoringConfig = {
+      keywords: scoringInputs,
+      weights: settings?.weights || getDefaultScoringWeights(),
+      normalizationMethod: 'min-max',
+      quickWinThreshold: settings?.quickWinThreshold || 0.7,
+      applySeasonalAdjustments: settings?.enableSeasonalAdjustments || false,
+      seasonalFactors: settings?.seasonalFactors
+    };
+
+    // Perform batch scoring
+    const scoredKeywords = await this.engine.batchScore(config);
+
+    if (onProgress) {
+      await onProgress({
+        stage: 'scoring',
+        stepName: 'Detecting quick wins',
+        current: scoredKeywords.length,
+        total: keywords.length,
+        percentage: 80,
+        message: 'Identifying quick win opportunities'
+      });
+    }
+
+    // Detect quick wins
+    const quickWins = this.detectQuickWins(scoredKeywords, settings?.quickWinThreshold);
+
+    // Generate analytics
+    const processingTime = Date.now() - startTime;
+    const analytics: ScoringAnalytics = {
+      runId: request.runId,
+      model: 'stage-specific-v1',
+      totalKeywords: keywords.length,
+      scoringTime: processingTime,
+      distribution: {
+        high: scoredKeywords.filter(r => r.tier === 'high').length,
+        medium: scoredKeywords.filter(r => r.tier === 'medium').length,
+        low: scoredKeywords.filter(r => r.tier === 'low').length
+      },
+      quickWinAnalysis: {
+        total: quickWins.length,
+        byStage: {
+          dream100: quickWins.filter(r => r.stage === 'dream100').length,
+          tier2: quickWins.filter(r => r.stage === 'tier2').length,
+          tier3: quickWins.filter(r => r.stage === 'tier3').length
+        } as Record<KeywordStage, number>,
+        byIntent: {
+          transactional: quickWins.filter(r => r.keyword.toString().includes('buy')).length,
+          commercial: quickWins.filter(r => r.keyword.toString().includes('best')).length,
+          informational: quickWins.filter(r => r.keyword.toString().includes('how')).length,
+          navigational: quickWins.filter(r => r.keyword.toString().includes('login')).length
+        } as Record<KeywordIntent, number>,
+        avgVolume: quickWins.reduce((sum, r) => sum + (r.componentScores.volume * 100000), 0) / (quickWins.length || 1),
+        avgDifficulty: quickWins.reduce((sum, r) => sum + ((1 - r.componentScores.ease) * 100), 0) / (quickWins.length || 1)
+      },
+      componentContributions: {
+        volume: scoredKeywords.reduce((sum, r) => sum + r.weightedScores.volume, 0) / scoredKeywords.length,
+        intent: scoredKeywords.reduce((sum, r) => sum + r.weightedScores.intent, 0) / scoredKeywords.length,
+        relevance: scoredKeywords.reduce((sum, r) => sum + r.weightedScores.relevance, 0) / scoredKeywords.length,
+        trend: scoredKeywords.reduce((sum, r) => sum + r.weightedScores.trend, 0) / scoredKeywords.length,
+        ease: scoredKeywords.reduce((sum, r) => sum + r.weightedScores.ease, 0) / scoredKeywords.length
+      },
+      recommendations: this.generateRecommendations(scoredKeywords, quickWins)
+    };
+
+    if (onProgress) {
+      await onProgress({
+        stage: 'scoring',
+        stepName: 'Scoring complete',
+        current: keywords.length,
+        total: keywords.length,
+        percentage: 100,
+        message: `Scored ${keywords.length} keywords, found ${quickWins.length} quick wins`
+      });
+    }
+
+    return {
+      scoredKeywords,
+      analytics,
+      quickWins
+    };
+  }
+
+  /**
+   * Generate recommendations based on scoring results
+   */
+  private generateRecommendations(
+    scoredKeywords: ScoringResult[],
+    quickWins: ScoringResult[]
+  ): string[] {
+    const recommendations: string[] = [];
+    const totalKeywords = scoredKeywords.length;
+    const quickWinRatio = quickWins.length / totalKeywords;
+
+    if (quickWinRatio < 0.1) {
+      recommendations.push('Low quick win ratio - consider focusing on easier keywords or adjusting difficulty thresholds');
+    } else if (quickWinRatio > 0.3) {
+      recommendations.push('Excellent quick win ratio - prioritize these for immediate content creation');
+    }
+
+    const highScoring = scoredKeywords.filter(r => r.tier === 'high').length;
+    if (highScoring / totalKeywords < 0.2) {
+      recommendations.push('Few high-scoring keywords - review keyword selection and relevance criteria');
+    }
+
+    const avgScore = scoredKeywords.reduce((sum, r) => sum + r.blendedScore, 0) / totalKeywords;
+    if (avgScore < 0.4) {
+      recommendations.push('Low average score - consider expanding keyword research or adjusting scoring weights');
+    }
+
+    return recommendations;
+  }
+}
+
+/**
+ * Alias class for backwards compatibility 
+ */
+export class ScoringService extends KeywordScoringService {
+  // Inherits all functionality from KeywordScoringService
+}

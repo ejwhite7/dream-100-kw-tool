@@ -132,6 +132,7 @@ export class ErrorTracker {
     } else {
       errorEvent = {
         id: errorId,
+        message: error.message || 'Unknown error',
         timestamp: new Date(),
         service: 'keyword-engine',
         severity: 'medium',
@@ -226,13 +227,13 @@ export class ErrorTracker {
   }
 
   startTransaction(name: string, operation: string): any {
-    return Sentry.startTransaction({
+    return Sentry.startSpan({
       name,
       op: operation,
-      tags: {
+      attributes: {
         service: 'keyword-engine'
       }
-    });
+    }, () => {});
   }
 
   capturePerformanceIssue(
@@ -290,8 +291,8 @@ export class ErrorTracker {
     
     return {
       total: recentErrors.length,
+      byseverity: bySeverity,
       byService,
-      bySeverity,
       topErrors
     };
   }

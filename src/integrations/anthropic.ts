@@ -357,7 +357,7 @@ Format as JSON:
     
     // Check cache first
     if (cacheKey) {
-      const cached = this.getFromCache(cacheKey);
+      const cached = this.getLLMCache(cacheKey);
       if (cached) {
         return {
           data: cached.data,
@@ -370,19 +370,23 @@ Format as JSON:
       }
     }
     
-    // Rate limiting
-    const canProceed = await this.checkRateLimit();
+    // Rate limiting - use tryConsume directly
+    const canProceed = this.checkAnthropicRateLimit();
     if (!canProceed) {
       this.metrics.rateLimitHits++;
-      throw ErrorHandler.createRateLimitError(
-        {
-          limit: (this.rateLimiter as any).config?.capacity || 0,
-          remaining: this.rateLimiter.getRemainingTokens(),
-          reset: Math.ceil(this.rateLimiter.getNextRefillTime() / 1000),
-          retryAfter: Math.ceil((this.rateLimiter.getNextRefillTime() - Date.now()) / 1000)
-        },
-        'anthropic'
-      );
+      const rateLimitInfo = {
+        limit: (this.rateLimiter as any).config?.capacity || 0,
+        remaining: this.rateLimiter.getRemainingTokens(),
+        reset: Math.ceil(this.rateLimiter.getNextRefillTime() / 1000),
+        retryAfter: Math.ceil((this.rateLimiter.getNextRefillTime() - Date.now()) / 1000)
+      };
+      
+      const error = new Error('Rate limit exceeded') as any;
+      error.code = 'RATE_LIMIT_ERROR';
+      error.statusCode = 429;
+      error.retryable = true;
+      error.rateLimit = rateLimitInfo;
+      throw error;
     }
     
     const startTime = Date.now();
@@ -441,12 +445,12 @@ Format as JSON:
       
       // Cache successful responses
       if (cacheKey) {
-        this.setCache(cacheKey, result);
+        this.setLLMCache(cacheKey, result);
       }
       
       // Update metrics
-      this.updateMetrics(true, processingTime, usage.cost_estimate);
-      this.trackUsage(operation, 'POST', 200, processingTime, usage.cost_estimate, false);
+      this.updateLLMMetrics(true, processingTime, usage.cost_estimate);
+      this.trackLLMUsage(operation, 'POST', 200, processingTime, usage.cost_estimate, false);
       
       return result;
       
@@ -454,19 +458,21 @@ Format as JSON:
       const processingTime = Date.now() - startTime;
       
       // Circuit breaker tracking
-      if (error.message?.includes('Circuit breaker')) {
+      if ((error as Error).message?.includes('Circuit breaker')) {
         this.metrics.circuitBreakerTrips++;
       }
       
-      this.updateMetrics(false, processingTime, 0);
-      this.trackUsage(operation, 'POST', 500, processingTime, 0, false);
+      this.updateLLMMetrics(false, processingTime, 0);
+      this.trackLLMUsage(operation, 'POST', 500, processingTime, 0, false);
       
-      throw ErrorHandler.handle(error as Error, {
-        provider: 'anthropic',
-        operation,
+      const enhancedError = error as any;
+      enhancedError.provider = 'anthropic';
+      enhancedError.operation = operation;
+      enhancedError.context = {
         systemPrompt: systemPrompt.substring(0, 100) + '...',
         userPrompt: userPrompt.substring(0, 100) + '...'
-      });
+      };
+      throw enhancedError;
     }
   }
   
@@ -474,14 +480,11 @@ Format as JSON:
     return (inputTokens * this.costPerToken) + (outputTokens * this.outputCostPerToken);
   }
   
-  private async checkRateLimit(): Promise<boolean> {
-    if ((this.rateLimiter as any).tryConsume) {
-      return await (this.rateLimiter as any).tryConsume();
-    }
+  private checkAnthropicRateLimit(): boolean {
     return this.rateLimiter.tryConsume();
   }
   
-  private getFromCache(key: string): any | null {
+  private getLLMCache(key: string): any | null {
     const cached = (this.cache as any).get(key);
     if (cached && Date.now() < cached.timestamp + cached.ttl) {
       return cached.data;
@@ -489,7 +492,7 @@ Format as JSON:
     return null;
   }
   
-  private setCache(key: string, data: any): void {
+  private setLLMCache(key: string, data: any): void {
     (this.cache as any).set(key, {
       data,
       timestamp: Date.now(),
@@ -497,7 +500,7 @@ Format as JSON:
     });
   }
   
-  private updateMetrics(success: boolean, responseTime: number, cost: number): void {
+  private updateLLMMetrics(success: boolean, responseTime: number, cost: number): void {
     this.metrics.requests++;
     this.metrics.lastRequest = Date.now();
     this.metrics.totalCost += cost;
@@ -514,7 +517,7 @@ Format as JSON:
       this.metrics.avgResponseTime * (1 - alpha) + responseTime * alpha;
   }
   
-  private trackUsage(
+  private trackLLMUsage(
     endpoint: string,
     method: string,
     status: number,
@@ -623,7 +626,7 @@ Format as JSON:
           extra: { keywords: batch.slice(0, 5) } // Only log first 5 keywords for privacy
         });
         
-        console.warn(`Batch ${i + 1}/${batches.length} failed for ${operation}:`, error.message);
+        console.warn(`Batch ${i + 1}/${batches.length} failed for ${operation}:`, (error as Error).message);
         // Continue with other batches
       }
     }
@@ -673,5 +676,118 @@ Format as JSON:
       chunks.push(array.slice(i, i + chunkSize));
     }
     return chunks;
+  }
+
+  // Backward compatibility aliases for cache adapters
+  async generateDream100(
+    seedKeywords: string[],
+    industry?: string,
+    targetAudience?: string,
+    market: string = 'US'
+  ): Promise<AnthropicResponse<AnthropicExpansionResult>> {
+    const request: AnthropicKeywordExpansion = {
+      seed_keywords: seedKeywords,
+      target_count: 100,
+      industry: industry || 'general business',
+      intent_focus: 'informational' as const
+    };
+    return this.expandToDream100(request);
+  }
+
+  async classifyKeywordIntents(
+    keywords: string[]
+  ): Promise<AnthropicResponse<AnthropicIntentResult[]>> {
+    const request: AnthropicIntentClassification = {
+      keywords,
+      context: {
+        industry: 'general business',
+        business_type: 'B2B/B2C',
+        target_audience: 'business decision makers'
+      }
+    };
+    return this.classifyIntent(request);
+  }
+
+  async generateContentTitles(
+    keywords: string[],
+    intent: string,
+    count: number = 5
+  ): Promise<AnthropicResponse<AnthropicTitleResult>> {
+    // Generate titles for the first keyword as representative
+    const keyword = keywords[0] || '';
+    const request: AnthropicTitleGeneration = {
+      keyword,
+      intent,
+      content_type: 'blog_post',
+      tone: 'professional',
+      max_length: 60
+    };
+    return this.generateTitles(request);
+  }
+
+  async expandKeywordVariations(
+    baseKeywords: string[],
+    variationType: 'tier2' | 'tier3',
+    count: number = 10,
+    market: string = 'US'
+  ): Promise<AnthropicResponse<AnthropicExpansionResult>> {
+    const request: AnthropicKeywordExpansion = {
+      seed_keywords: baseKeywords,
+      target_count: count,
+      industry: 'general business',
+      intent_focus: 'informational' as const
+    };
+    return this.expandToDream100(request);
+  }
+
+  async processPrompt(
+    prompt: string,
+    model: string = 'claude-3-5-sonnet-20241022',
+    temperature: number = 0.1,
+    maxTokens: number = 1000
+  ): Promise<AnthropicResponse<string>> {
+    return this.makeLLMRequest<string>(
+      'You are a helpful assistant.',
+      prompt,
+      {
+        temperature,
+        maxTokens,
+        operation: 'process_prompt'
+      }
+    );
+  }
+
+  async createCompletionStream(
+    prompt: string,
+    options?: any
+  ): Promise<any> {
+    // Streaming not implemented in this version
+    throw new Error('Streaming completions not implemented');
+  }
+
+  async createChatCompletion(
+    messages: any[],
+    options?: any
+  ): Promise<AnthropicResponse<any>> {
+    // Convert messages to single prompt for now
+    const prompt = messages.map((m: any) => `${m.role}: ${m.content}`).join('\n');
+    return this.processPrompt(prompt, options?.model, options?.temperature, options?.max_tokens);
+  }
+  
+  // Usage tracking method
+  getUsage(): { tokens: number; cost: number } {
+    return {
+      tokens: this.metrics.requests,
+      cost: this.metrics.totalCost
+    };
+  }
+  
+  /**
+   * Expand keywords using semantic variations - universe service compatibility
+   */
+  async expandKeywords(
+    request: AnthropicKeywordExpansion
+  ): Promise<AnthropicResponse<AnthropicExpansionResult>> {
+    return this.expandToDream100(request);
   }
 }

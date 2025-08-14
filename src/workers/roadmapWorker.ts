@@ -21,7 +21,9 @@ import * as Sentry from '@sentry/nextjs';
 import { addDays, format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import type { UUID, Cluster, RoadmapItem } from '../models';
 import type { KeywordStage, KeywordIntent, RoadmapStage } from '../types/database';
-import { RoadmapService } from '../services/roadmap';
+import { RoadmapGenerationService, type RoadmapServiceConfig } from '../services/roadmap';
+import type { RoadmapGenerationConfig, TeamMember } from '../models/roadmap';
+import type { ClusterWithKeywords } from '../models/cluster';
 
 /**
  * Worker-specific job progress interface
@@ -101,14 +103,23 @@ export async function processRoadmapJob(
   
   try {
     // Initialize roadmap service
-    const roadmapService = new RoadmapService(
-      process.env.ANTHROPIC_API_KEY || ''
-    );
+    // Calculate planning parameters first
+    const postsPerMonth = settings.postsPerMonth || 20;
+    
+    const config: RoadmapServiceConfig = {
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+      defaultPostsPerMonth: postsPerMonth,
+      defaultDuration: 3, // 3 months
+      maxConcurrentTitleGeneration: 5,
+      bufferDays: 2,
+      holidayDates: [],
+      workingDays: [1, 2, 3, 4, 5] // Monday to Friday
+    };
+    const roadmapService = new RoadmapGenerationService(config);
     
     // Calculate planning parameters
     const startDate = settings.startDate ? parseISO(settings.startDate) : new Date();
     const endDate = settings.endDate ? parseISO(settings.endDate) : addDays(startDate, 90); // Default 3 months
-    const postsPerMonth = settings.postsPerMonth || 20;
     const teamMembers = settings.teamMembers || ['Content Team'];
     
     // Update initial progress
@@ -147,18 +158,41 @@ export async function processRoadmapJob(
     let currentStep = 0;
     const totalSteps = 5; // Content strategy, Calendar planning, Team assignment, Post generation, Quality validation
     
+    const roadmapConfig: RoadmapGenerationConfig = {
+      startDate: format(startDate, 'yyyy-MM-dd'),
+      postsPerMonth,
+      duration: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 30)),
+      pillarRatio: 0.3,
+      quickWinPriority: settings.prioritizeQuickWins ?? true,
+      teamMembers: teamMembers.map(name => ({
+        name,
+        email: `${name.toLowerCase().replace(/\s+/g, '.')}@company.com`,
+        role: 'writer' as const,
+        capacity: 10, // posts per month
+        specialties: [] as string[],
+        unavailable: [] as string[]
+      } satisfies TeamMember)),
+      contentTypes: [
+        {
+          type: 'blog_post',
+          intents: ['informational' as const, 'commercial' as const],
+          minVolume: 100,
+          maxDifficulty: 80,
+          estimatedHours: 4,
+          template: {
+            titleFormat: 'How to {keyword}',
+            structure: ['introduction', 'main_content', 'conclusion'],
+            wordCount: 1500,
+            requiredSections: ['introduction', 'conclusion']
+          }
+        }
+      ]
+    };
+    
     const result = await roadmapService.generateRoadmap(
-      clusters as any,
-      {
-        startDate,
-        endDate,
-        postsPerMonth,
-        teamMembers,
-        contentStrategy: settings.contentStrategy || 'pillar-supporting',
-        prioritizeQuickWins: settings.prioritizeQuickWins ?? true,
-        enableSeasonality: settings.enableSeasonality ?? false,
-        workloadDistribution: settings.workloadDistribution || 'equal',
-      },
+      runId,
+      clusters as ClusterWithKeywords[],
+      roadmapConfig,
       async (progress: any) => {
         const progressPercent = ((progress.completedSteps || 0) / (progress.totalSteps || 1)) * 100;
         const overallProgress = (currentStep / totalSteps) * 100 + (progressPercent / totalSteps);

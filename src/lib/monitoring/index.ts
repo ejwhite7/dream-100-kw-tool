@@ -11,7 +11,7 @@ export { UserActivityTracker } from './user-activity';
 export { SLOManager } from './slo-manager';
 
 // Monitoring configuration
-export { MonitoringConfig } from './config';
+export type { MonitoringConfig } from './config';
 
 // Types
 export type {
@@ -76,10 +76,17 @@ export {
   startUserSession,
   endUserSession,
   getCurrentSessionId,
-  useUserActivityTracking,
+  createUserActivityTracker,
   createErrorBoundary,
   checkSystemHealth,
   fetchMonitoringData,
   initializeFrontendMonitoring,
-  withMonitoring
+  createComponentMonitor
 } from './utils/frontend-helpers';
+
+// React-specific utilities
+export {
+  useUserActivityTracking,
+  withMonitoring,
+  createReactErrorBoundary
+} from './utils/react-helpers';

@@ -78,7 +78,7 @@ export class CacheMonitor {
         await this.collectMetrics();
         await this.checkHealth();
       } catch (error) {
-        console.error('Cache monitoring error:', error);
+        console.error('Cache monitoring error:', (error as Error).message);
       }
     }, interval);
     
@@ -376,7 +376,7 @@ export class CacheMonitor {
       try {
         callback(alert);
       } catch (error) {
-        console.error('Alert callback error:', error);
+        console.error('Alert callback error:', (error as Error).message);
       }
     }
   }
@@ -484,8 +484,8 @@ export class CacheMonitor {
       filtered = filtered.filter(m => m.tags.component === options.component);
     }
     
-    if (options.since) {
-      filtered = filtered.filter(m => m.timestamp >= options.since);
+    if (options.since !== undefined) {
+      filtered = filtered.filter(m => m.timestamp >= options.since!);
     }
     
     if (options.limit) {
@@ -518,8 +518,8 @@ export class CacheMonitor {
       alerts = alerts.filter(a => a.resolved === options.resolved);
     }
     
-    if (options.since) {
-      alerts = alerts.filter(a => a.timestamp >= options.since);
+    if (options.since !== undefined) {
+      alerts = alerts.filter(a => a.timestamp >= options.since!);
     }
     
     return alerts.sort((a, b) => b.timestamp - a.timestamp);

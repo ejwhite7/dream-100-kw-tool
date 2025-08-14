@@ -20,7 +20,7 @@ import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
 import type { UUID, Keyword } from '../models';
 import type { KeywordStage, KeywordIntent } from '../types/database';
-import { UniverseService } from '../services/universe';
+import { UniverseExpansionService, type UniverseExpansionRequest, type UniverseProgressCallback } from '../services/universe';
 
 /**
  * Worker-specific job progress interface
@@ -82,6 +82,7 @@ export interface UniverseJobResult {
     costs: {
       anthropic: number;
       ahrefs: number;
+      scraping: number;
       total: number;
     };
   };
@@ -112,7 +113,7 @@ export async function processUniverseJob(
   
   try {
     // Initialize universe service
-    const universeService = new UniverseService(
+    const universeService = new UniverseExpansionService(
       process.env.ANTHROPIC_API_KEY || '',
       process.env.AHREFS_API_KEY || ''
     );
@@ -151,7 +152,7 @@ export async function processUniverseJob(
     let currentStep = 0;
     const totalSteps = 5; // Tier-2 expansion, Tier-3 expansion, Metrics enrichment, Competitor analysis, Quality filtering
     
-    const result = await universeService.expandToUniverse({
+    const universeRequest: UniverseExpansionRequest = {
       runId,
       dream100Keywords: dreamKeywords.map(k => k.keyword),
       maxTier2PerDream: settings.maxTier2PerDream || 10,
@@ -161,17 +162,20 @@ export async function processUniverseJob(
       enableSerpAnalysis: settings.enableSerpScraping ?? true,
       market: settings.market || 'US',
       qualityThreshold: settings.qualityThreshold || 0.3,
-    },
-      async (progress: WorkerJobProgress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + ((progress.percentage || 0) / totalSteps);
+    };
+    
+    const result = await universeService.expandToUniverse(
+      universeRequest,
+      async (progress) => {
+        const overallProgress = (currentStep / totalSteps) * 100 + ((progress.progressPercent || 0) / totalSteps);
         
         await job.updateProgress({
           stage: 'universe',
-          stepName: progress.stepName || '',
-          current: progress.current || 0,
-          total: progress.total || 0,
+          stepName: progress.currentStep || '',
+          current: progress.keywordsProcessed || 0,
+          total: settings.maxTotalKeywords || 10000,
           percentage: Math.min(overallProgress, 100),
-          message: progress.message,
+          message: `Processing ${progress.currentTier} keywords: ${progress.currentStep}`,
           estimatedTimeRemaining: progress.estimatedTimeRemaining || 0,
           metadata: {
             currentStep: currentStep + 1,
@@ -188,7 +192,7 @@ export async function processUniverseJob(
             progress: {
               current_stage: 'universe',
               stages_completed: ['expansion'],
-              keywords_discovered: progress.current,
+              keywords_discovered: progress.keywordsProcessed,
               percent_complete: 20 + Math.min(overallProgress * 0.4, 40), // Universe is ~40% of pipeline
               estimated_time_remaining: progress.estimatedTimeRemaining || 0,
             },
@@ -270,10 +274,15 @@ export async function processUniverseJob(
         competitorsFound: 0,
         serpUrlsScraped: 0,
         processingTime,
-        apiCalls: result.processingStats.apiCallCounts,
+        apiCalls: {
+          anthropic: result.processingStats.apiCallCounts.anthropic || 0,
+          ahrefs: result.processingStats.apiCallCounts.ahrefs || 0,
+          scraping: result.processingStats.apiCallCounts.serp || 0
+        },
         costs: {
           anthropic: result.costBreakdown.anthropicCost,
           ahrefs: result.costBreakdown.ahrefsCost,
+          scraping: result.costBreakdown.serpApiCost || 0,
           total: result.costBreakdown.totalCost
         },
       },

@@ -18,7 +18,21 @@
 
 import { Job } from 'bullmq';
 import * as Sentry from '@sentry/nextjs';
-import type { UUID, Keyword, Cluster, JobProgress } from '../models';
+import type { UUID, Keyword, Cluster } from '../models';
+
+/**
+ * Worker-specific job progress interface
+ */
+interface WorkerJobProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, any>;
+}
 import type { KeywordStage, KeywordIntent } from '../types/database';
 import { ClusteringService } from '../services/clustering';
 import { supabase } from '../lib/supabase';
@@ -85,7 +99,10 @@ export async function processClusteringJob(
   
   try {
     // Initialize clustering service
-    const clusteringService = new ClusteringService();
+    const clusteringService = new ClusteringService(
+      process.env.OPENAI_API_KEY!,
+      process.env.ANTHROPIC_API_KEY!
+    );
     
     // Track memory usage
     const initialMemory = process.memoryUsage();
@@ -105,7 +122,7 @@ export async function processClusteringJob(
         targetClusters: settings.targetClusterCount || 'auto',
         method: settings.clusteringMethod || 'hierarchical',
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Update run status
     await supabase
@@ -126,20 +143,20 @@ export async function processClusteringJob(
     const totalSteps = 4; // Embedding generation, Similarity calculation, Clustering, Validation
     const embeddingStartTime = Date.now();
     
-    const result = await clusteringService.clusterKeywords({
+    const result = await clusteringService.clusterKeywords(
       keywords,
-      runId,
-      settings: {
+      {
+        method: 'semantic',
         similarityThreshold: settings.similarityThreshold || 0.7,
         minClusterSize: settings.minClusterSize || 3,
         maxClusterSize: settings.maxClusterSize || 50,
-        targetClusterCount: settings.targetClusterCount,
-        enableIntentGrouping: settings.enableIntentGrouping ?? true,
-        embeddingModel: settings.embeddingModel || 'text-embedding-3-small',
-        clusteringMethod: settings.clusteringMethod || 'hierarchical',
+        maxClusters: settings.targetClusterCount || 100,
+        intentWeight: 0.3,
+        semanticWeight: 0.7,
+        outlierThreshold: 0.5
       },
-      onProgress: async (progress) => {
-        const overallProgress = (currentStep / totalSteps) * 100 + (progress.percentage / totalSteps);
+      async (progress) => {
+        const overallProgress = Math.min(progress.percentComplete, 100);
         
         // Track memory usage
         const currentMemory = process.memoryUsage();
@@ -149,11 +166,11 @@ export async function processClusteringJob(
         
         await job.updateProgress({
           stage: 'clustering',
-          stepName: progress.stepName,
-          current: progress.current,
+          stepName: progress.currentOperation,
+          current: progress.processed,
           total: progress.total,
-          percentage: Math.min(overallProgress, 100),
-          message: progress.message,
+          percentage: overallProgress,
+          message: progress.currentOperation,
           estimatedTimeRemaining: progress.estimatedTimeRemaining,
           metadata: {
             currentStep: currentStep + 1,
@@ -162,7 +179,7 @@ export async function processClusteringJob(
             memoryUsage: Math.round(currentMemory.heapUsed / 1024 / 1024), // MB
             runId,
           },
-        } satisfies JobProgress);
+        } satisfies WorkerJobProgress);
         
         // Update database progress
         await supabase
@@ -172,27 +189,22 @@ export async function processClusteringJob(
               current_stage: 'clustering',
               stages_completed: ['expansion', 'universe'],
               keywords_discovered: keywords.length,
-              clusters_created: progress.metadata?.clustersCreated || 0,
+              clusters_created: 0, // Will be updated when clustering completes
               percent_complete: 60 + Math.min(overallProgress * 0.2, 20), // Clustering is ~20% of pipeline
               estimated_time_remaining: progress.estimatedTimeRemaining,
             },
           })
           .eq('id', runId);
-      },
-      onStepComplete: async (stepName: string) => {
-        currentStep++;
-        console.log(`Clustering step '${stepName}' completed (${currentStep}/${totalSteps})`);
         
-        if (stepName === 'Embedding Generation') {
+        // Handle step completion logic
+        if (progress.stage === 'embeddings' && progress.percentComplete === 100) {
+          currentStep++;
+          console.log(`Clustering step 'Embedding Generation' completed (${currentStep}/${totalSteps})`);
           const embeddingTime = Date.now() - embeddingStartTime;
           console.log(`Embedding generation completed in ${embeddingTime}ms`);
         }
-      },
-      onClusterCreated: async (cluster: Cluster) => {
-        // Log cluster creation for monitoring
-        console.log(`Created cluster '${cluster.label}' with ${cluster.size} keywords`);
-      },
-    });
+      }
+    );
 
     const embeddingGenerationTime = Date.now() - embeddingStartTime;
     const clusteringTime = Date.now() - startTime - embeddingGenerationTime;
@@ -211,12 +223,12 @@ export async function processClusteringJob(
       message: `Clustering completed with ${result.clusters.length} clusters`,
       metadata: {
         clustersCreated: result.clusters.length,
-        unclusteredCount: result.unclusteredKeywords?.length || 0,
+        unclusteredCount: result.outliers?.length || 0,
         qualityMetrics,
         avgClusterSize: Math.round(keywords.length / result.clusters.length),
         runId,
       },
-    } satisfies JobProgress);
+    } satisfies WorkerJobProgress);
 
     // Bulk insert clusters to database
     if (result.clusters.length > 0) {
@@ -270,13 +282,13 @@ export async function processClusteringJob(
 
     return {
       clusters: result.clusters,
-      unclusteredKeywords: result.unclusteredKeywords || [],
+      unclusteredKeywords: result.outliers || [],
       metrics: {
         totalKeywords: keywords.length,
         clustersCreated: result.clusters.length,
-        unclusteredCount: result.unclusteredKeywords?.length || 0,
+        unclusteredCount: result.outliers?.length || 0,
         avgClusterSize: result.clusters.length > 0 ? keywords.length / result.clusters.length : 0,
-        avgSilhouetteScore: result.metrics?.silhouetteScore || 0,
+        avgSilhouetteScore: result.metrics?.avgSilhouetteScore || 0,
         embeddingGenerationTime,
         clusteringTime,
         totalProcessingTime,

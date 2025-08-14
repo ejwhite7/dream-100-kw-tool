@@ -794,7 +794,7 @@ export class IngestionService {
         isConfigured: true,
         isValid: false,
         hasQuota: false,
-        errorMessage: `API key validation failed: ${error.message}`
+        errorMessage: `API key validation failed: ${(error as Error).message}`
       };
     }
   }

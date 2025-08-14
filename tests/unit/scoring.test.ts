@@ -245,7 +245,7 @@ describe('ScoringService', () => {
 
   describe('calculateBlendedScore', () => {
     it('should calculate correct blended score for dream100 keywords', () => {
-      const keyword = mockKeywords[0];
+      const keyword = mockKeywords[0]!;
       const result = scoringService.calculateBlendedScore(keyword);
 
       // Verify score calculation with dream100 weights
@@ -271,7 +271,7 @@ describe('ScoringService', () => {
     });
 
     it('should calculate correct blended score for tier2 keywords', () => {
-      const keyword = mockKeywords[1];
+      const keyword = mockKeywords[1]!;
       const result = scoringService.calculateBlendedScore(keyword);
 
       expect(result.blendedScore).toBeGreaterThan(0);
@@ -284,7 +284,7 @@ describe('ScoringService', () => {
     });
 
     it('should calculate correct blended score for tier3 keywords', () => {
-      const keyword = mockKeywords[2];
+      const keyword = mockKeywords[2]!;
       const result = scoringService.calculateBlendedScore(keyword);
 
       expect(result.blendedScore).toBeGreaterThan(0);
@@ -297,7 +297,7 @@ describe('ScoringService', () => {
 
     it('should handle missing optional scores gracefully', () => {
       const keywordWithMissingScores: Keyword = {
-        ...mockKeywords[0],
+        ...mockKeywords[0]!,
         commercialScore: undefined,
         trendScore: undefined
       };

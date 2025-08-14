@@ -165,9 +165,9 @@ export class SLOManager {
     this.checkForViolations(targetId, newStatus);
     
     // Send to Sentry
-    Sentry.setMeasurement(`slo_${targetId}_value`, currentValue);
-    Sentry.setMeasurement(`slo_${targetId}_error_budget_used`, errorBudgetUsed);
-    Sentry.setMeasurement(`slo_${targetId}_burn_rate`, burnRate);
+    Sentry.setMeasurement(`slo_${targetId}_value`, currentValue, 'percent');
+    Sentry.setMeasurement(`slo_${targetId}_error_budget_used`, errorBudgetUsed, 'percent');
+    Sentry.setMeasurement(`slo_${targetId}_burn_rate`, burnRate, 'ratio');
   }
 
   private calculateSLOValue(target: SLOTarget, metrics: MetricData[]): number {

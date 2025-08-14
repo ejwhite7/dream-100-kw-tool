@@ -1,7 +1,14 @@
 import { AnthropicClient } from './anthropic';
 import { CacheFactory, getCacheSystem } from '../lib/cache-init';
 import { CACHE_TTL } from '../lib/cache-integrations';
-import { AnthropicResponse } from '../types/anthropic';
+import { 
+  AnthropicResponse, 
+  AnthropicExpansionResult,
+  AnthropicIntentResult,
+  AnthropicTitleResult,
+  AnthropicClusterResult,
+  AnthropicCompetitorResult
+} from '../types/anthropic';
 
 /**
  * Cache-enhanced Anthropic client that integrates with the comprehensive Redis cache system
@@ -28,7 +35,7 @@ export class CachedAnthropicClient {
     industry: string,
     targetAudience?: string,
     market: string = 'US'
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<AnthropicExpansionResult>> {
     const cacheSystem = getCacheSystem();
     if (!cacheSystem) {
       return this.client.generateDream100(seedKeywords, industry, targetAudience, market);
@@ -42,15 +49,28 @@ export class CachedAnthropicClient {
       
       if (cached) {
         console.log(`Dream 100 for [${seedKeywords.join(', ')}] served from cache`);
+        // Transform cached data to proper structure
+        const expansionResult: AnthropicExpansionResult = Array.isArray(cached) 
+          ? {
+              keywords: cached.map((kw: string) => ({ keyword: kw, intent: 'informational' as const, relevance_score: 0.8, reasoning: 'From cache' })),
+              total_generated: cached.length,
+              processing_time: 0,
+              model_used: 'cached'
+            }
+          : cached as AnthropicExpansionResult;
         return {
-          success: true,
-          data: cached,
-          metadata: {
-            fromCache: true,
-            tokensUsed: 0,
-            cost: 0,
-            savings: 0.20, // Estimated cost for Dream 100 generation
+          data: expansionResult,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            model: 'cached',
+            cost_estimate: 0,
+            request_id: `cached_${Date.now()}`
           },
+          model: 'cached',
+          finish_reason: 'cached',
+          request_id: `cached_${Date.now()}`,
+          processing_time: 0
         };
       }
       
@@ -58,19 +78,15 @@ export class CachedAnthropicClient {
       console.log(`Generating Dream 100 for [${seedKeywords.join(', ')}] from Anthropic API`);
       const response = await this.client.generateDream100(seedKeywords, industry, targetAudience, market);
       
-      if (response.success && Array.isArray(response.data)) {
+      if (response.data && response.data.keywords) {
         // Cache the result
-        await anthropic.cacheDream100(seedKeywords, market, response.data);
+        // Cache the keywords array for backwards compatibility
+        const keywordsArray = response.data.keywords.map(k => k.keyword);
+        await anthropic.cacheDream100(seedKeywords, market, keywordsArray);
         console.log(`Cached Dream 100 for [${seedKeywords.join(', ')}]`);
       }
       
-      return {
-        ...response,
-        metadata: {
-          ...response.metadata,
-          fromCache: false,
-        },
-      };
+      return response;
     } catch (error) {
       console.error('Cached Dream 100 generation failed:', error);
       return this.client.generateDream100(seedKeywords, industry, targetAudience, market);
@@ -82,7 +98,7 @@ export class CachedAnthropicClient {
    */
   async classifyKeywordIntents(
     keywords: string[]
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<AnthropicIntentResult[]>> {
     const cacheSystem = getCacheSystem();
     if (!cacheSystem) {
       return this.client.classifyKeywordIntents(keywords);
@@ -94,18 +110,23 @@ export class CachedAnthropicClient {
       // Check cache for all keywords
       const { cached, missing } = await anthropic.getCachedIntentClassifications(keywords);
       
-      const results: Array<{ keyword: string; intent: string; confidence: number }> = [];
+      const results: AnthropicIntentResult[] = [];
       let fromCache = 0;
       let fromApi = 0;
       
       // Add cached results
       for (const keyword of keywords) {
         if (cached[keyword]) {
-          results.push({
+          const cachedData = cached[keyword];
+          // Ensure cached data has all required properties
+          const intentResult: AnthropicIntentResult = {
             keyword,
-            intent: cached[keyword].intent,
-            confidence: cached[keyword].confidence,
-          });
+            intent: (cachedData.intent || 'informational') as 'informational' | 'commercial' | 'transactional' | 'navigational',
+            confidence: cachedData.confidence || 0.8,
+            reasoning: (cachedData as any).reasoning || 'From cache',
+            suggested_content_type: (cachedData as any).suggested_content_type || ['blog_post']
+          };
+          results.push(intentResult);
           fromCache++;
         }
       }
@@ -117,20 +138,42 @@ export class CachedAnthropicClient {
         try {
           const apiResponse = await this.client.classifyKeywordIntents(missing);
           
-          if (apiResponse.success && Array.isArray(apiResponse.data)) {
+          if (apiResponse.data && Array.isArray(apiResponse.data)) {
             // Add API results
-            results.push(...apiResponse.data);
+            // Ensure API results have proper structure
+            const processedResults: AnthropicIntentResult[] = apiResponse.data.map(item => ({
+              keyword: item.keyword,
+              intent: item.intent,
+              confidence: item.confidence,
+              reasoning: item.reasoning || 'From API',
+              suggested_content_type: item.suggested_content_type || ['blog_post']
+            }));
+            results.push(...processedResults);
             fromApi = apiResponse.data.length;
             
             // Cache the new classifications
-            await anthropic.cacheIntentClassification(missing, apiResponse.data);
+            await anthropic.cacheIntentClassification(missing, processedResults);
             
             console.log(`Cached ${apiResponse.data.length} intent classifications`);
           } else {
             // If API call fails, return cached results only
-            console.warn('Intent classification API call failed, returning cached results only:', apiResponse.error);
+            console.warn('Intent classification API call failed, returning cached results only');
             if (fromCache === 0) {
-              return apiResponse; // No cached data, return error
+              // Create proper error response structure
+              return {
+                data: [],
+                usage: {
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  model: 'error',
+                  cost_estimate: 0,
+                  request_id: `error_${Date.now()}`
+                },
+                model: 'error',
+                finish_reason: 'error',
+                request_id: `error_${Date.now()}`,
+                processing_time: 0
+              };
             }
           }
         } catch (error) {
@@ -145,17 +188,18 @@ export class CachedAnthropicClient {
       }
       
       return {
-        success: true,
         data: results,
-        metadata: {
-          fromCache,
-          fromApi,
-          total: results.length,
-          cacheHitRate: fromCache / keywords.length,
-          tokensUsed: fromApi * 50, // Estimated tokens per classification
-          cost: fromApi * 0.001, // Estimated cost per classification
-          savings: fromCache * 0.001, // Estimated savings
+        usage: {
+          input_tokens: fromApi * 50,
+          output_tokens: fromApi * 20,
+          model: 'claude-3-5-sonnet-20241022',
+          cost_estimate: fromApi * 0.001,
+          request_id: `intent_classification_${Date.now()}`
         },
+        model: 'claude-3-5-sonnet-20241022',
+        finish_reason: 'complete',
+        request_id: `intent_classification_${Date.now()}`,
+        processing_time: 0 // Cached response has no processing time
       };
     } catch (error) {
       console.error('Cached intent classification request failed:', error);
@@ -170,7 +214,7 @@ export class CachedAnthropicClient {
     keywords: string[],
     intent: string,
     count: number = 5
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<AnthropicTitleResult>> {
     if (!this.cache) {
       return this.client.generateContentTitles(keywords, intent, count);
     }
@@ -183,33 +227,31 @@ export class CachedAnthropicClient {
       if (cached) {
         console.log(`Content titles for [${keywords.join(', ')}] served from cache`);
         return {
-          success: true,
           data: cached,
-          metadata: {
-            fromCache: true,
-            tokensUsed: 0,
-            cost: 0,
-            savings: 0.05, // Estimated cost for title generation
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            model: 'cached',
+            cost_estimate: 0,
+            request_id: `cached_${Date.now()}`
           },
+          model: 'cached',
+          finish_reason: 'cached',
+          request_id: `cached_${Date.now()}`,
+          processing_time: 0
         };
       }
       
       // Generate new titles
       const response = await this.client.generateContentTitles(keywords, intent, count);
       
-      if (response.success) {
+      if (response.data) {
         // Cache the result
         await this.cache.set(cacheKey, 'claude-3-sonnet', response.data);
         console.log(`Cached content titles for [${keywords.join(', ')}]`);
       }
       
-      return {
-        ...response,
-        metadata: {
-          ...response.metadata,
-          fromCache: false,
-        },
-      };
+      return response;
     } catch (error) {
       console.error('Cached title generation request failed:', error);
       return this.client.generateContentTitles(keywords, intent, count);
@@ -224,7 +266,7 @@ export class CachedAnthropicClient {
     variationType: 'tier2' | 'tier3',
     count: number = 10,
     market: string = 'US'
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<AnthropicExpansionResult>> {
     if (!this.cache) {
       return this.client.expandKeywordVariations(baseKeywords, variationType, count, market);
     }
@@ -237,33 +279,31 @@ export class CachedAnthropicClient {
       if (cached) {
         console.log(`Keyword variations for [${baseKeywords.join(', ')}] served from cache`);
         return {
-          success: true,
           data: cached,
-          metadata: {
-            fromCache: true,
-            tokensUsed: 0,
-            cost: 0,
-            savings: 0.10, // Estimated cost for expansion
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            model: 'cached',
+            cost_estimate: 0,
+            request_id: `cached_${Date.now()}`
           },
+          model: 'cached',
+          finish_reason: 'cached',
+          request_id: `cached_${Date.now()}`,
+          processing_time: 0
         };
       }
       
       // Generate new variations
       const response = await this.client.expandKeywordVariations(baseKeywords, variationType, count, market);
       
-      if (response.success) {
+      if (response.data) {
         // Cache the result
         await this.cache.set(cacheKey, 'claude-3-sonnet', response.data);
         console.log(`Cached keyword variations for [${baseKeywords.join(', ')}]`);
       }
       
-      return {
-        ...response,
-        metadata: {
-          ...response.metadata,
-          fromCache: false,
-        },
-      };
+      return response;
     } catch (error) {
       console.error('Cached keyword expansion request failed:', error);
       return this.client.expandKeywordVariations(baseKeywords, variationType, count, market);
@@ -278,44 +318,41 @@ export class CachedAnthropicClient {
     model: string = 'claude-3-sonnet-20240229',
     temperature: number = 0.1,
     maxTokens: number = 1000
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<string>> {
     if (!this.cache) {
       return this.client.processPrompt(prompt, model, temperature, maxTokens);
     }
     
     try {
       // Check cache
-      const cached = await this.cache.get(prompt, model, temperature);
+      const cached = await this.cache.get(prompt, model);
       
       if (cached) {
         return {
-          success: true,
           data: cached,
-          metadata: {
-            fromCache: true,
-            tokensUsed: 0,
-            cost: 0,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
             model,
-            temperature,
+            cost_estimate: 0,
+            request_id: `cached_${Date.now()}`
           },
+          model,
+          finish_reason: 'cached',
+          request_id: `cached_${Date.now()}`,
+          processing_time: 0
         };
       }
       
       // Process new prompt
       const response = await this.client.processPrompt(prompt, model, temperature, maxTokens);
       
-      if (response.success) {
+      if (response.data) {
         // Cache the result
-        await this.cache.set(prompt, model, response.data, temperature);
+        await this.cache.set(prompt, model, response.data);
       }
       
-      return {
-        ...response,
-        metadata: {
-          ...response.metadata,
-          fromCache: false,
-        },
-      };
+      return response;
     } catch (error) {
       console.error('Cached prompt processing failed:', error);
       return this.client.processPrompt(prompt, model, temperature, maxTokens);
@@ -392,14 +429,38 @@ export class CachedAnthropicClient {
   async createChatCompletion(
     messages: any[],
     options?: any
-  ): Promise<AnthropicResponse> {
+  ): Promise<AnthropicResponse<any>> {
     // Could add caching for chat completions too
     return this.client.createChatCompletion(messages, options);
   }
   
-  // Proxy health check and other utility methods
-  healthCheck = this.client.healthCheck?.bind(this.client);
-  getUsage = this.client.getUsage?.bind(this.client);
+  // Health check method
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    issues: string[];
+    metrics: any;
+    circuitBreaker: any;
+    rateLimit: any;
+    cache: any;
+  }> {
+    try {
+      return await this.client.healthCheck();
+    } catch (error) {
+      return {
+        healthy: false,
+        issues: [(error as Error).message],
+        metrics: null,
+        circuitBreaker: null,
+        rateLimit: null,
+        cache: null
+      };
+    }
+  }
+  
+  // Usage tracking method
+  getUsage(): { tokens: number; cost: number } {
+    return this.client.getUsage();
+  }
 }
 
 /**
@@ -445,7 +506,7 @@ export class AnthropicCacheMigration {
     );
     const cachedTime2 = Date.now() - cachedStart2;
     
-    const fromCache = cachedResponses.filter(r => r.metadata?.fromCache).length;
+    const fromCache = cachedResponses.filter(r => r.usage?.input_tokens === 0).length;
     
     // Test original client (limited to avoid API costs)
     const uncachedStart = Date.now();

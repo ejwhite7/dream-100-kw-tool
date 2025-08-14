@@ -8,6 +8,10 @@
 import { z } from 'zod';
 import type { UUID, Timestamp, JSONValue } from './index';
 import type { ProcessingStage } from './run';
+import { ProcessingStageSchema } from './run';
+
+// Re-export ProcessingStage for easier access
+export type { ProcessingStage };
 import type { KeywordStage } from '../types/database';
 
 /**
@@ -51,6 +55,32 @@ export interface JobData {
   readonly config: StageConfig;
   readonly dependencies: UUID[]; // job IDs this job depends on
   readonly resources: ResourceRequirements;
+}
+
+/**
+ * Job progress tracking
+ */
+export interface JobProgress {
+  readonly jobId: UUID;
+  readonly runId?: UUID;
+  readonly stage: ProcessingStage;
+  readonly status: JobStatus;
+  readonly progress: number; // 0-100
+  readonly percentage: number; // 0-100 (alias for progress)
+  readonly message: string;
+  readonly currentStep: string;
+  readonly totalSteps: number;
+  readonly completedSteps: number;
+  readonly itemsProcessed?: number;
+  readonly totalItems?: number;
+  readonly estimatedTimeRemaining: number; // minutes
+  readonly startedAt?: Timestamp | null;
+  readonly estimatedCompletionAt?: Timestamp | null;
+  readonly error?: string;
+  readonly artifacts: JobArtifact[];
+  readonly metrics: JobMetrics;
+  readonly metadata?: Record<string, unknown>; // Additional progress metadata
+  readonly lastUpdated: Timestamp;
 }
 
 /**
@@ -147,6 +177,20 @@ export interface JobMetrics {
     readonly anthropic?: number;
     readonly compute?: number;
   };
+}
+
+/**
+ * Worker progress update (simplified for real-time updates)
+ */
+export interface WorkerProgress {
+  stage: string;
+  stepName: string;
+  current: number;
+  total: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -280,6 +324,8 @@ export interface ExecutionProgress {
   };
 }
 
+// JobProgress interface merged with the main definition above
+
 /**
  * Execution error information
  */
@@ -395,12 +441,7 @@ export const JobStatusSchema = z.enum([
   'queued', 'processing', 'completed', 'failed', 'cancelled', 'retrying', 'paused'
 ]);
 
-export const ProcessingStageSchema = z.enum([
-  'initialization', 'dream100_generation', 'tier2_expansion', 'tier3_expansion',
-  'metrics_enrichment', 'competitor_discovery', 'content_scraping',
-  'semantic_clustering', 'scoring_calculation', 'roadmap_generation',
-  'export_preparation', 'finalization'
-]);
+// ProcessingStageSchema imported from run.ts to avoid duplication
 
 export const ResourceRequirementsSchema = z.object({
   memory: z.number().int().min(128).max(16384).default(512),
@@ -517,18 +558,14 @@ export const calculateJobPriority = (
 ): number => {
   // Base priority by stage (critical path gets higher priority)
   const stagePriorities: Record<ProcessingStage, number> = {
-    'initialization': 10,
-    'dream100_generation': 9,
-    'tier2_expansion': 8,
-    'tier3_expansion': 7,
-    'metrics_enrichment': 6,
-    'competitor_discovery': 5,
-    'content_scraping': 4,
-    'semantic_clustering': 3,
-    'scoring_calculation': 2,
-    'roadmap_generation': 1,
-    'export_preparation': 1,
-    'finalization': 1
+    'initialization': 15,
+    'expansion': 12,
+    'universe': 9,
+    'clustering': 5,
+    'scoring': 3,
+    'roadmap': 2,
+    'export': 1,
+    'cleanup': 1
   };
   
   let priority = stagePriorities[stage];
@@ -553,17 +590,13 @@ export const estimateJobDuration = (
   // Base duration estimates in minutes
   const baseDurations: Record<ProcessingStage, number> = {
     'initialization': 1,
-    'dream100_generation': 3,
-    'tier2_expansion': 5,
-    'tier3_expansion': 8,
-    'metrics_enrichment': 10,
-    'competitor_discovery': 4,
-    'content_scraping': 6,
-    'semantic_clustering': 3,
-    'scoring_calculation': 1,
-    'roadmap_generation': 1,
-    'export_preparation': 1,
-    'finalization': 1
+    'expansion': 5,
+    'universe': 12,
+    'clustering': 8,
+    'scoring': 3,
+    'roadmap': 2,
+    'export': 1,
+    'cleanup': 1
   };
   
   const baseDuration = baseDurations[stage];
@@ -602,17 +635,13 @@ export const createJobGraph = (
 ): Array<{ stage: ProcessingStage; dependencies: ProcessingStage[] }> => {
   const dependencies: Record<ProcessingStage, ProcessingStage[]> = {
     'initialization': [],
-    'dream100_generation': ['initialization'],
-    'tier2_expansion': ['dream100_generation'],
-    'tier3_expansion': ['tier2_expansion'],
-    'metrics_enrichment': ['tier3_expansion'],
-    'competitor_discovery': ['dream100_generation'],
-    'content_scraping': ['competitor_discovery'],
-    'semantic_clustering': ['metrics_enrichment', 'content_scraping'],
-    'scoring_calculation': ['semantic_clustering'],
-    'roadmap_generation': ['scoring_calculation'],
-    'export_preparation': ['roadmap_generation'],
-    'finalization': ['export_preparation']
+    'expansion': ['initialization'],
+    'universe': ['expansion'],
+    'clustering': ['universe'],
+    'scoring': ['clustering'],
+    'roadmap': ['scoring'],
+    'export': ['roadmap'],
+    'cleanup': ['export']
   };
   
   return stages.map(stage => ({

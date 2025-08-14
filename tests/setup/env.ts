@@ -5,8 +5,8 @@
  * required for running tests consistently across different environments.
  */
 
-import dotenv from 'dotenv';
-import path from 'path';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
 
 // Load environment-specific test configuration
 const envFile = process.env.NODE_ENV === 'ci' ? '.env.ci' : '.env.test';
@@ -80,7 +80,7 @@ import { TextEncoder, TextDecoder } from 'util';
 import { webcrypto } from 'crypto';
 
 // Add missing global objects
-global.TextEncoder = TextEncoder;
+global.TextEncoder = TextEncoder as any;
 global.TextDecoder = TextDecoder;
 
 // Add Web Crypto API for Node.js < 16

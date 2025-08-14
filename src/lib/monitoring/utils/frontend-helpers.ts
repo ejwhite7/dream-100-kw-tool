@@ -237,8 +237,8 @@ export function getCurrentSessionId(): string | null {
   return currentSessionId;
 }
 
-// React hook for user activity tracking
-export function useUserActivityTracking(userId?: string) {
+// User activity tracking functions
+export function createUserActivityTracker(userId?: string) {
   const sessionId = getCurrentSessionId();
 
   const trackClick = (element: string, context?: Record<string, any>) => {
@@ -402,21 +402,16 @@ export function initializeFrontendMonitoring(userId?: string) {
   });
 }
 
-// React component wrapper for monitoring
-export function withMonitoring<P extends object>(
-  Component: React.ComponentType<P>,
-  componentName: string
-) {
-  return function MonitoredComponent(props: P) {
-    const startTime = performance.now();
-    
-    React.useEffect(() => {
-      const renderTime = performance.now() - startTime;
+// Component monitoring helper
+export function createComponentMonitor(componentName: string) {
+  return {
+    startTime: performance.now(),
+    measureRenderTime: () => {
+      const endTime = performance.now();
+      const renderTime = endTime - performance.now();
       trackPerformance(`component_render_${componentName}`, renderTime, {
         componentName
       });
-    }, []);
-    
-    return React.createElement(Component, props);
+    }
   };
 }

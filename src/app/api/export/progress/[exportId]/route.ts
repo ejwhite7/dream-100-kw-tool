@@ -43,10 +43,10 @@ interface ProgressResponse {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { exportId: string } }
+  { params }: { params: Promise<{ exportId: string }> }
 ): Promise<NextResponse<ProgressResponse>> {
   try {
-    const { exportId } = params;
+    const { exportId } = await params;
 
     if (!exportId) {
       return NextResponse.json({
@@ -166,10 +166,10 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { exportId: string } }
+  { params }: { params: Promise<{ exportId: string }> }
 ): Promise<NextResponse<{ success: boolean; data?: { cancelled: boolean }; error?: { message: string; code: string } }>> {
   try {
-    const { exportId } = params;
+    const { exportId } = await params;
 
     if (!exportId) {
       return NextResponse.json({

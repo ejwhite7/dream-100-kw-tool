@@ -24,16 +24,16 @@ export class SystemObservability {
     const traceId = this.generateTraceId();
     const spanId = this.generateSpanId();
     
-    // Create Sentry transaction
-    const transaction = Sentry.startTransaction({
+    // Create Sentry span
+    const transaction = Sentry.startSpan({
       name: operationName,
       op: 'trace',
-      tags: {
+      attributes: {
         traceId,
         service: 'keyword-engine',
         ...tags
       }
-    });
+    }, () => {});
     
     const traceData: TraceData = {
       traceId,

@@ -76,10 +76,10 @@ class MockRedisStorage {
   keys(pattern: string): string[] {
     const regex = new RegExp(pattern.replace(/\*/g, '.*'));
     const allKeys = [
-      ...this.storage.keys(),
-      ...this.lists.keys(),
-      ...this.sets.keys(),
-      ...this.hashes.keys()
+      ...Array.from(this.storage.keys()),
+      ...Array.from(this.lists.keys()),
+      ...Array.from(this.sets.keys()),
+      ...Array.from(this.hashes.keys())
     ];
     return allKeys.filter(key => regex.test(key));
   }

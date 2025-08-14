@@ -171,9 +171,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     
   } catch (error) {
-    const apiError = ErrorHandler.handle(error as Error, {
-      operation: 'process_ingestion',
-      requestId
+    const apiError = ErrorHandler.handleApiError(error as Error, {
+      provider: 'ingestion',
+      endpoint: '/api/ingestion',
+      method: 'POST'
     });
     
     Sentry.captureException(apiError);
@@ -240,10 +241,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }, { status: 200 });
     
   } catch (error) {
-    const apiError = ErrorHandler.handle(error as Error, {
-      operation: 'validate_keys',
-      requestId
-    });
+    const apiError = ErrorHandler.handleValidationError(error as Error, {});
     
     Sentry.captureException(apiError);
     
@@ -321,9 +319,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     }, { status: 200 });
     
   } catch (error) {
-    const apiError = ErrorHandler.handle(error as Error, {
-      operation: 'update_settings',
-      requestId
+    const apiError = ErrorHandler.handleSystemError(error as Error, {
+      component: 'IngestionAPI',
+      operation: 'update_settings'
     });
     
     Sentry.captureException(apiError);

@@ -150,7 +150,7 @@ export class PerformanceMonitor {
             console.log('✓ Cache monitoring initialized');
           }
         } catch (error) {
-          console.warn('Cache monitoring initialization failed:', error.message);
+          console.warn('Cache monitoring initialization failed:', (error as Error).message);
         }
       }
       
@@ -209,11 +209,13 @@ export class PerformanceMonitor {
     });
     
     // Send to Sentry
-    Sentry.setMeasurement('LCP', vitals.LCP);
-    Sentry.setMeasurement('FID', vitals.FID);
-    Sentry.setMeasurement('CLS', vitals.CLS);
-    Sentry.setMeasurement('TTFB', vitals.TTFB);
-    Sentry.setMeasurement('FCP', vitals.FCP);
+    if (typeof Sentry.setMeasurement === 'function') {
+      Sentry.setMeasurement('LCP', vitals.LCP, 'millisecond');
+      Sentry.setMeasurement('FID', vitals.FID, 'millisecond');
+      Sentry.setMeasurement('CLS', vitals.CLS, 'none');
+      Sentry.setMeasurement('TTFB', vitals.TTFB, 'millisecond');
+      Sentry.setMeasurement('FCP', vitals.FCP, 'millisecond');
+    }
     
     // Alert on poor performance
     if (vitals.LCP > 2500) {
@@ -242,7 +244,9 @@ export class PerformanceMonitor {
     });
     
     // Send to Sentry
-    Sentry.setMeasurement(`api_${metrics.endpoint}_response_time`, metrics.responseTime);
+    if (typeof Sentry.setMeasurement === 'function') {
+      Sentry.setMeasurement(`api_${metrics.endpoint}_response_time`, metrics.responseTime, 'millisecond');
+    }
     SentryReporter.captureApiUsage({
       provider: metrics.provider || 'internal',
       endpoint: metrics.endpoint,
@@ -251,7 +255,9 @@ export class PerformanceMonitor {
       responseTime: metrics.responseTime,
       cost: metrics.cost || 0,
       cached: metrics.cached,
-      timestamp
+      timestamp,
+      userId: undefined,
+      runId: undefined
     });
     
     // Alert on issues
@@ -278,12 +284,14 @@ export class PerformanceMonitor {
     this.addMetric('business-metrics', metrics);
     
     // Send key business metrics to Sentry
-    Sentry.setMeasurement('keywords_processed', metrics.dream100Generated + metrics.universeExpanded);
-    Sentry.setMeasurement('clusters_created', metrics.clustersCreated);
-    Sentry.setMeasurement('total_cost', metrics.totalCost);
-    Sentry.setMeasurement('cost_per_keyword', metrics.costPerKeyword);
-    Sentry.setMeasurement('relevance_score', metrics.relevanceScore);
-    Sentry.setMeasurement('error_rate', metrics.errorRate);
+    if (typeof Sentry.setMeasurement === 'function') {
+      Sentry.setMeasurement('keywords_processed', metrics.dream100Generated + metrics.universeExpanded, 'none');
+      Sentry.setMeasurement('clusters_created', metrics.clustersCreated, 'none');
+      Sentry.setMeasurement('total_cost', metrics.totalCost, 'none');
+      Sentry.setMeasurement('cost_per_keyword', metrics.costPerKeyword, 'none');
+      Sentry.setMeasurement('relevance_score', metrics.relevanceScore, 'none');
+      Sentry.setMeasurement('error_rate', metrics.errorRate, 'none');
+    }
     
     // Business metric alerts
     if (metrics.errorRate > 0.1) {
@@ -326,10 +334,12 @@ export class PerformanceMonitor {
     this.addMetric('system-health', metrics);
     
     // Send to Sentry
-    Sentry.setMeasurement('system_response_time', metrics.responseTime);
-    Sentry.setMeasurement('system_error_rate', metrics.errorRate);
-    Sentry.setMeasurement('cache_hit_rate', metrics.cacheHitRate);
-    Sentry.setMeasurement('queue_depth', metrics.queueDepth);
+    if (typeof Sentry.setMeasurement === 'function') {
+      Sentry.setMeasurement('system_response_time', metrics.responseTime, 'millisecond');
+      Sentry.setMeasurement('system_error_rate', metrics.errorRate, 'none');
+      Sentry.setMeasurement('cache_hit_rate', metrics.cacheHitRate, 'none');
+      Sentry.setMeasurement('queue_depth', metrics.queueDepth, 'none');
+    }
     
     // System alerts
     if (metrics.responseTime > 1000) {
@@ -365,18 +375,21 @@ export class PerformanceMonitor {
     });
     
     // Use existing Sentry reporter
-    SentryReporter.captureKeywordProcessingEvent(
+    SentryReporter.captureKeywordProcessing({
       stage,
-      data.keywordCount,
-      data.processingTime,
-      data.runId,
-      data.userId
-    );
+      keywordCount: data.keywordCount,
+      processingTime: data.processingTime,
+      success: data.successRate > 0.9,
+      runId: data.runId,
+      userId: data.userId
+    });
     
     // Additional workflow-specific metrics
-    Sentry.setMeasurement(`${stage}_success_rate`, data.successRate);
-    Sentry.setMeasurement(`${stage}_quality_score`, data.quality);
-    Sentry.setMeasurement(`${stage}_cost`, data.cost);
+    if (typeof Sentry.setMeasurement === 'function') {
+      Sentry.setMeasurement(`${stage}_success_rate`, data.successRate, 'none');
+      Sentry.setMeasurement(`${stage}_quality_score`, data.quality, 'none');
+      Sentry.setMeasurement(`${stage}_cost`, data.cost, 'none');
+    }
     
     // Workflow alerts
     if (data.successRate < 0.9) {
@@ -544,7 +557,7 @@ export class PerformanceMonitor {
       .map(([endpoint, averageTime]) => ({
         endpoint,
         averageTime,
-        calls: endpointGroups[endpoint].length
+        calls: endpointGroups[endpoint]?.length ?? 0
       }))
       .sort((a, b) => b.averageTime - a.averageTime)
       .slice(0, 5);
@@ -769,15 +782,13 @@ export class PerformanceMonitor {
   
   private enhanceSentryMonitoring(): void {
     // Add custom Sentry configurations
-    Sentry.configureScope(scope => {
-      scope.setTag('monitoring-service', 'active');
-      scope.setTag('monitoring-version', '1.0.0');
-      
-      scope.setContext('monitoring-config', {
-        cacheMonitoring: !!this.cacheMonitor,
-        metricsRetention: this.metricsRetention,
-        alertRules: this.alerts.size
-      });
+    Sentry.setTag('monitoring-service', 'active');
+    Sentry.setTag('monitoring-version', '1.0.0');
+    
+    Sentry.setContext('monitoring-config', {
+      cacheMonitoring: !!this.cacheMonitor,
+      metricsRetention: this.metricsRetention,
+      alertRules: this.alerts.size
     });
   }
   

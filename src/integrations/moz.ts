@@ -141,6 +141,13 @@ export class MozClient {
   }
 
   /**
+   * Simple delay utility
+   */
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
    * Simple rate limiting
    */
   private async checkRateLimit(): Promise<void> {

@@ -719,7 +719,7 @@ export const unique = <T>(array: T[], key?: keyof T): T[] => {
   });
 };
 
-export const pick = <T, K extends keyof T>(
+export const pick = <T extends object, K extends keyof T>(
   obj: T,
   keys: K[]
 ): Pick<T, K> => {

@@ -1,5 +1,5 @@
 // Enhanced Database Service with Security and Performance Optimizations
-import { supabase, supabaseAdmin, DatabaseService as BaseService } from './supabase'
+import { supabase, supabaseAdmin, DatabaseService } from './supabase'
 import { 
   Database, 
   RunSettings, 
@@ -7,16 +7,17 @@ import {
   RunProgress, 
   EditorialRoadmapCSV, 
   KeywordUniverseCSV 
-} from '@/types/database'
+} from '../types/database'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-export class EnhancedDatabaseService extends BaseService {
+export class EnhancedDatabaseService {
   // Rate limiting check
   static async checkRateLimit(
     userId: string, 
     endpoint: string, 
     maxRequests: number = 1000, 
     windowDuration: string = '1 hour'
-  ) {
+  ): Promise<{ data: any; error: any }> {
     const { data, error } = await supabaseAdmin.rpc('check_rate_limit', {
       p_user_id: userId,
       p_api_endpoint: endpoint,
@@ -32,7 +33,7 @@ export class EnhancedDatabaseService extends BaseService {
     userId: string,
     ahrefsKey?: string,
     anthropicKey?: string
-  ) {
+  ): Promise<{ data: any; error: any }> {
     const updates: any = {}
     
     if (ahrefsKey) {
@@ -70,7 +71,7 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Retrieve and decrypt API keys
-  static async getApiKeys(userId: string) {
+  static async getApiKeys(userId: string): Promise<{ data: { ahrefs_api_key: string | null; anthropic_api_key: string | null } | null; error: any }> {
     const { data: settings, error } = await supabaseAdmin
       .from('settings')
       .select('ahrefs_api_key_encrypted, anthropic_api_key_encrypted')
@@ -107,13 +108,31 @@ export class EnhancedDatabaseService extends BaseService {
     }
   }
 
+  // Delegate to base service methods
+  static getUserRuns = DatabaseService.getUserRuns;
+  static getRunWithData = DatabaseService.getRunWithData;
+  static getClusterWithKeywords = DatabaseService.getClusterWithKeywords;
+  static getUserSettings = DatabaseService.getUserSettings;
+  static updateRunProgress = DatabaseService.updateRunProgress;
+  static bulkInsertKeywords = DatabaseService.bulkInsertKeywords;
+  static bulkInsertClusters = DatabaseService.bulkInsertClusters;
+  static getKeywordsPaginated = DatabaseService.getKeywordsPaginated;
+  static getClusterAnalytics = DatabaseService.getClusterAnalytics;
+  static refreshClusterAnalytics = DatabaseService.refreshClusterAnalytics;
+  static deleteRun = DatabaseService.deleteRun;
+  static encryptApiKey = DatabaseService.encryptApiKey;
+  static decryptApiKey = DatabaseService.decryptApiKey;
+  static getEditorialRoadmapForExport = DatabaseService.getEditorialRoadmapForExport;
+  static getKeywordUniverseForExport = DatabaseService.getKeywordUniverseForExport;
+  static getRunMetrics = DatabaseService.getRunMetrics;
+
   // Enhanced run creation with validation and audit logging
   static async createRun(
     userId: string,
     seedKeywords: string[],
     settings: RunSettings = {},
     clientInfo?: { ip?: string, userAgent?: string }
-  ) {
+  ): Promise<{ data: any; error: any }> {
     // Set client info for audit logging
     if (clientInfo?.ip) {
       await supabaseAdmin.rpc('set_config', {
@@ -186,7 +205,7 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Enhanced keyword search with full-text search and ranking
-  static async searchKeywords(runId: string, searchTerm: string, limit: number = 50) {
+  static async searchKeywords(runId: string, searchTerm: string, limit: number = 50): Promise<{ data: any; error: any }> {
     const { data, error } = await supabaseAdmin.rpc('search_keywords_ranked', {
       p_run_id: runId,
       p_search_term: searchTerm,
@@ -197,7 +216,7 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Enhanced cluster search
-  static async searchClusters(runId: string, searchTerm: string, limit: number = 20) {
+  static async searchClusters(runId: string, searchTerm: string, limit: number = 20): Promise<{ data: any; error: any }> {
     const { data, error } = await supabaseAdmin.rpc('search_clusters_ranked', {
       p_run_id: runId,
       p_search_term: searchTerm,
@@ -207,7 +226,7 @@ export class EnhancedDatabaseService extends BaseService {
     return { data, error }
   }
 
-  // Bulk operations with transaction support
+  // Bulk operations with batch processing
   static async bulkUpdateKeywords(
     runId: string,
     updates: Array<{
@@ -217,26 +236,30 @@ export class EnhancedDatabaseService extends BaseService {
       quick_win?: boolean
       [key: string]: any
     }>
-  ) {
-    const { error } = await supabaseAdmin.transaction(async (txn) => {
-      for (const update of updates) {
-        await txn
+  ): Promise<{ error: any | null }> {
+    const results = await Promise.allSettled(
+      updates.map(update => 
+        supabaseAdmin
           .from('keywords')
           .update(update)
           .eq('id', update.id)
           .eq('run_id', runId) // Security check
-      }
-    })
+      )
+    )
     
-    return { error }
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map(result => result.reason)
+    
+    return { error: errors.length > 0 ? errors[0] : null }
   }
 
   // Generate CSV exports with proper formatting
   static async generateEditorialRoadmapCSV(runId: string): Promise<string> {
-    const { data, error } = await this.getEditorialRoadmapForExport(runId)
+    const { data, error } = await DatabaseService.getEditorialRoadmapForExport(runId)
     if (error || !data) throw error || new Error('No roadmap data found')
     
-    const csvData: EditorialRoadmapCSV[] = data.map(item => ({
+    const csvData: EditorialRoadmapCSV[] = data.map((item: any) => ({
       post_id: item.post_id,
       cluster_label: item.cluster?.label || 'Unclustered',
       stage: item.stage,
@@ -259,10 +282,10 @@ export class EnhancedDatabaseService extends BaseService {
   }
   
   static async generateKeywordUniverseCSV(runId: string): Promise<string> {
-    const { data, error } = await this.getKeywordUniverseForExport(runId)
+    const { data, error } = await DatabaseService.getKeywordUniverseForExport(runId)
     if (error || !data) throw error || new Error('No keyword data found')
     
-    const csvData: KeywordUniverseCSV[] = data.map(keyword => ({
+    const csvData: KeywordUniverseCSV[] = data.map((keyword: any) => ({
       keyword: keyword.keyword,
       tier: keyword.stage,
       cluster_label: keyword.cluster?.label || null,
@@ -311,7 +334,7 @@ export class EnhancedDatabaseService extends BaseService {
     recordId?: string,
     oldValues?: any,
     newValues?: any
-  ) {
+  ): Promise<void> {
     try {
       await supabaseAdmin
         .from('audit_logs')
@@ -329,7 +352,7 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Performance monitoring
-  static async getPerformanceMetrics(runId: string) {
+  static async getPerformanceMetrics(runId: string): Promise<{ run: any; performance: any; error: any }> {
     const startTime = Date.now()
     
     const [
@@ -353,18 +376,22 @@ export class EnhancedDatabaseService extends BaseService {
     const queryTime = Date.now() - startTime
     
     // Calculate stage distribution
-    const stageCounts = { dream100: 0, tier2: 0, tier3: 0 }
-    const quickWinsByStage = { dream100: 0, tier2: 0, tier3: 0 }
+    const stageCounts: Record<'dream100' | 'tier2' | 'tier3', number> = { dream100: 0, tier2: 0, tier3: 0 }
+    const quickWinsByStage: Record<'dream100' | 'tier2' | 'tier3', number> = { dream100: 0, tier2: 0, tier3: 0 }
     
-    keywordCounts.data?.forEach(row => {
-      stageCounts[row.stage]++
-      if (row.quick_win) quickWinsByStage[row.stage]++
+    keywordCounts.data?.forEach((row: any) => {
+      if (row.stage && row.stage in stageCounts) {
+        stageCounts[row.stage as keyof typeof stageCounts]++
+        if (row.quick_win) quickWinsByStage[row.stage as keyof typeof quickWinsByStage]++
+      }
     })
     
     // Calculate roadmap distribution
-    const roadmapCounts = { pillar: 0, supporting: 0 }
-    roadmapCounts.data?.forEach(row => {
-      roadmapCounts[row.stage]++
+    const roadmapDistribution: Record<'pillar' | 'supporting', number> = { pillar: 0, supporting: 0 }
+    roadmapCounts.data?.forEach((row: any) => {
+      if (row.stage && row.stage in roadmapDistribution) {
+        roadmapDistribution[row.stage as keyof typeof roadmapDistribution]++
+      }
     })
     
     return {
@@ -375,7 +402,7 @@ export class EnhancedDatabaseService extends BaseService {
         total_clusters: clusterAnalytics.data?.length || 0,
         stage_counts: stageCounts,
         quick_wins_by_stage: quickWinsByStage,
-        roadmap_counts: roadmapCounts,
+        roadmap_counts: roadmapDistribution,
         cluster_analytics: clusterAnalytics.data || []
       },
       error: runData.error || keywordCounts.error || clusterAnalytics.error || roadmapCounts.error
@@ -383,13 +410,13 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Data cleanup and maintenance
-  static async cleanupOldData() {
+  static async cleanupOldData(): Promise<{ deletedCount: any; error: any }> {
     const { data, error } = await supabaseAdmin.rpc('cleanup_old_data')
     return { deletedCount: data, error }
   }
 
   // Health check
-  static async healthCheck() {
+  static async healthCheck(): Promise<{ healthy: boolean; response_time_ms: number; error?: string }> {
     const startTime = Date.now()
     
     try {
@@ -415,7 +442,7 @@ export class EnhancedDatabaseService extends BaseService {
   }
 
   // Advanced analytics queries
-  static async getRunComparison(userId: string, runIds: string[]) {
+  static async getRunComparison(userId: string, runIds: string[]): Promise<{ data: any; error: any }> {
     const { data, error } = await supabaseAdmin
       .from('run_summaries')
       .select('*')
@@ -426,7 +453,7 @@ export class EnhancedDatabaseService extends BaseService {
     return { data, error }
   }
 
-  static async getUserAnalytics(userId: string, days: number = 30) {
+  static async getUserAnalytics(userId: string, days: number = 30): Promise<{ data: any; error: any }> {
     const { data, error } = await supabaseAdmin
       .from('run_summaries')
       .select('*')

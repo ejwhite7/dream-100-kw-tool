@@ -325,7 +325,7 @@ export class PerformanceMonitor {
       }
     });
     
-    Sentry.setMeasurement(metric.operation, metric.duration);
+    Sentry.setMeasurement(metric.operation, metric.duration, 'millisecond');
     
     // Check thresholds
     this.checkPerformanceThresholds(metric);
@@ -348,7 +348,7 @@ export class PerformanceMonitor {
       }
     });
     
-    Sentry.setMeasurement(`api_${metric.endpoint.replace(/[^a-zA-Z0-9]/g, '_')}_response_time`, metric.responseTime);
+    Sentry.setMeasurement(`api_${metric.endpoint.replace(/[^a-zA-Z0-9]/g, '_')}_response_time`, metric.responseTime, 'millisecond');
     
     // Alert on slow API calls
     if (metric.responseTime > this.config.performance.verySlowThreshold) {
@@ -370,7 +370,7 @@ export class PerformanceMonitor {
     this.resourceMetrics.push(metric);
     
     // Send to Sentry
-    Sentry.setMeasurement(`resource_${metric.type}_${metric.name}`, metric.value);
+    Sentry.setMeasurement(`resource_${metric.type}_${metric.name}`, metric.value, metric.unit);
   }
 
   getPerformanceStats(timeWindow: number = 3600000): {

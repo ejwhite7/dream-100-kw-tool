@@ -30,6 +30,8 @@ export interface StageWeights {
   readonly ease: number; // 0-1 (1 - normalized difficulty)
 }
 
+// StageWeights is already exported above, no need to re-export
+
 /**
  * Scoring input data for a single keyword
  */
@@ -262,14 +264,14 @@ export const ScoringWeightsSchema = z.object({
 });
 
 export const ScoringInputSchema = z.object({
-  keyword: z.string().min(1).max(255),
+  keyword: z.string().min(1).max(255).transform(val => val as KeywordString),
   stage: z.enum(['dream100', 'tier2', 'tier3']),
   volume: z.number().int().min(0).max(10000000),
   difficulty: z.number().int().min(0).max(100),
   intent: z.enum(['transactional', 'commercial', 'informational', 'navigational']).nullable(),
   relevance: z.number().min(0).max(1),
   trend: z.number().min(-1).max(1),
-  weights: StageWeightsSchema.partial().optional()
+  weights: StageWeightsSchema.optional()
 });
 
 export const BatchScoringConfigSchema = z.object({

@@ -94,7 +94,7 @@ export interface AhrefsCompetitorRequest {
 }
 
 export interface AhrefsKeywordIdeasRequest {
-  seed_keywords: string[];
+  target: string; // Changed from seed_keywords to target for compatibility
   country?: string;
   limit?: number;
   volume_from?: number;
@@ -106,6 +106,21 @@ export interface AhrefsKeywordIdeasRequest {
 
 // Response wrappers
 export interface AhrefsResponse<T> {
+  data: T;
+  quota: AhrefsApiQuota;
+  request_id: string;
+  processing_time: number;
+}
+
+// Metrics types
+export type AhrefsMetric = 'volume' | 'difficulty' | 'cpc' | 'traffic_potential' | 'return_rate' | 'clicks' | 'global_volume';
+export type AhrefsMetrics = AhrefsMetric[];
+
+// Backward compatibility alias  
+export type AhrefsKeywordMetrics = AhrefsKeywordData;
+
+// Enhanced response types with better generic constraints
+export interface AhrefsGenericResponse<T = any> extends AhrefsResponse<T> {
   data: T;
   quota: AhrefsApiQuota;
   request_id: string;

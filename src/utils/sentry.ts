@@ -1,7 +1,21 @@
 import * as Sentry from '@sentry/nextjs';
+import { ComponentType, ErrorInfo } from 'react';
+// import type { ApiUsageEvent } from '@/types/api'; // TODO: Fix when types/api is available
+
+// Enhanced type definitions for better type safety
+type SentryBreadcrumbLevel = 'debug' | 'info' | 'warning' | 'error' | 'fatal';
+type SentryErrorLevel = 'fatal' | 'error' | 'warning' | 'info' | 'debug';
+
+interface SentryBreadcrumbData {
+  [key: string]: any;
+}
+
+interface SentryContext {
+  [key: string]: any;
+}
 
 export class SentryReporter {
-  static captureApiUsage(event: any): void {
+  static captureApiUsage(event: any): void { // TODO: Use proper ApiUsageEvent type
     Sentry.addBreadcrumb({
       message: `API call to ${event.provider}`,
       level: event.status >= 400 ? 'warning' : 'info',
@@ -24,7 +38,7 @@ export class SentryReporter {
     }
   }
 
-  static captureApiMetrics(serviceName: string, metrics: any): void {
+  static captureApiMetrics(serviceName: string, metrics: Record<string, any>): void {
     Sentry.addBreadcrumb({
       message: `API metrics for ${serviceName}`,
       level: 'info',
@@ -36,7 +50,7 @@ export class SentryReporter {
     });
   }
 
-  static captureBusinessMetrics(metrics: any): void {
+  static captureBusinessMetrics(metrics: Record<string, any>): void {
     Sentry.addBreadcrumb({
       message: 'Business metrics update',
       level: 'info',
@@ -45,7 +59,14 @@ export class SentryReporter {
     });
   }
 
-  static captureKeywordProcessing(data: any): void {
+  static captureKeywordProcessing(data: {
+    stage: string;
+    keywordCount: number;
+    processingTime: number;
+    success: boolean;
+    runId?: string;
+    userId?: string;
+  }): void {
     Sentry.addBreadcrumb({
       message: 'Keyword processing event',
       level: 'info',
@@ -59,7 +80,12 @@ export class SentryReporter {
     });
   }
 
-  static captureExportEvent(event: any): void {
+  static captureExportEvent(event: {
+    format: string;
+    recordCount: number;
+    template?: string;
+    success: boolean;
+  }): void {
     Sentry.addBreadcrumb({
       message: `Export ${event.format} requested`,
       level: 'info',
@@ -82,7 +108,12 @@ export class SentryReporter {
     });
   }
 
-  static capturePipelineProgress(progress: any): void {
+  static capturePipelineProgress(progress: {
+    step: string;
+    progress: number;
+    eta?: number;
+    keywordsProcessed: number;
+  }): void {
     Sentry.addBreadcrumb({
       message: 'Pipeline progress update',
       level: 'info',
@@ -110,13 +141,14 @@ export class SentryReporter {
     });
   }
 
-  static captureError(error: Error, context?: Record<string, any>): void {
+  static captureError(error: Error, context?: SentryContext): void {
     Sentry.withScope((scope) => {
       if (context) {
         Object.keys(context).forEach(key => {
           scope.setContext(key, context[key]);
         });
       }
+      scope.setLevel('error');
       Sentry.captureException(error);
     });
   }
@@ -133,42 +165,48 @@ export class SentryReporter {
   }
 }
 
-// Enhanced error boundary wrapper
+// Simple error boundary wrapper without JSX
 export function withSentryErrorBoundary<P extends object>(
-  Component: React.ComponentType<P>,
+  Component: ComponentType<P>,
   options?: {
-    fallback?: React.ComponentType<{ error: Error; resetError: () => void }>;
     showDialog?: boolean;
+    beforeCapture?: (scope: Sentry.Scope, error: Error, errorInfo?: unknown) => void;
   }
-) {
+): ComponentType<P> {
+  // Simplified wrapper that just uses Sentry's default error boundary
   return Sentry.withErrorBoundary(Component, {
-    fallback: options?.fallback || (() => null),
     showDialog: options?.showDialog || false,
     beforeCapture: (scope, error, errorInfo) => {
       scope.setTag('errorBoundary', true);
-      scope.setContext('errorInfo', errorInfo);
+      scope.setContext('errorInfo', (errorInfo as unknown as Record<string, any>) || {});
       scope.setLevel('error');
+      if (options?.beforeCapture) {
+        options.beforeCapture(scope, error as Error, errorInfo);
+      }
     }
   });
 }
 
-// Hook for capturing user interactions
-export function useSentryInteraction() {
-  return {
-    captureClick: (element: string, context?: Record<string, any>) => {
-      Sentry.addBreadcrumb({
-        message: `User clicked: ${element}`,
-        level: 'info',
-        category: 'ui.click',
-        data: context
-      });
-    },
-    captureNavigation: (from: string, to: string) => {
-      Sentry.addBreadcrumb({
-        message: `Navigation: ${from} -> ${to}`,
-        level: 'info',
-        category: 'navigation'
-      });
-    }
-  };
-}
+// Simple interaction tracking functions
+export const SentryInteraction = {
+  captureClick: (element: string, context?: Record<string, any>) => {
+    Sentry.addBreadcrumb({
+      message: `User clicked: ${element}`,
+      level: 'info',
+      category: 'ui.click',
+      data: context
+    });
+  },
+
+  captureNavigation: (from: string, to: string) => {
+    Sentry.addBreadcrumb({
+      message: `Navigation: ${from} -> ${to}`,
+      level: 'info',
+      category: 'navigation',
+      data: { from, to }
+    });
+  }
+};
+
+// Note: Enhanced error boundary component should be implemented in a .tsx file
+// if JSX is needed, or use Sentry's built-in error boundary

@@ -130,7 +130,7 @@ export class CostTracker {
       }
     });
 
-    Sentry.setMeasurement(`cost_${service}_${operation}`, cost);
+    Sentry.setMeasurement(`cost_${service}_${operation}`, cost, 'USD');
 
     // Alert on high individual costs
     if (cost > 10) { // Alert for single operations > $10
@@ -252,7 +252,7 @@ export class CostTracker {
       scope.setTag('budgetAlert', true);
       scope.setTag('service', service);
       scope.setTag('period', period);
-      scope.setContext('budgetDetails', alert);
+      scope.setContext('budgetDetails', alert as Record<string, any>);
       
       Sentry.captureMessage(
         `Budget ${severity}: ${service} ${period} at ${alert.percentage.toFixed(1)}%`,

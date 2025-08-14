@@ -68,6 +68,7 @@ export type {
   PipelineJob,
   JobStatus,
   JobData,
+  JobProgress,
   StageConfig,
   ResourceRequirements,
   ResourceLimits,
@@ -197,6 +198,12 @@ export type {
   RunStatus,
   RoadmapStage
 } from '../types/database';
+
+// Ensure ProcessingStage is available
+export type { ProcessingStage } from './pipeline';
+
+// Remove duplicate ScoringWeights export to avoid conflicts
+// ScoringWeights is already exported from './scoring'
 export * from '../types/ahrefs';
 export * from '../types/anthropic';
 export * from '../types/api';
@@ -205,6 +212,58 @@ export * from '../types/api';
 export type UUID = string;
 export type Timestamp = string;
 export type JSONValue = string | number | boolean | null | { [key: string]: JSONValue } | JSONValue[];
+
+/**
+ * Utility function to clean objects of undefined values for JSON serialization
+ */
+export const cleanForJSON = (obj: any): JSONValue => {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(cleanForJSON).filter(item => item !== null);
+  }
+  
+  if (typeof obj === 'object') {
+    const cleaned: { [key: string]: JSONValue } = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        const cleanedValue = cleanForJSON(value);
+        if (cleanedValue !== null) {
+          cleaned[key] = cleanedValue;
+        }
+      }
+    }
+    return cleaned;
+  }
+  
+  // Primitive values
+  if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
+    return obj;
+  }
+  
+  return null;
+};
+
+/**
+ * Type guard for JSONValue
+ */
+export const isJSONValue = (value: unknown): value is JSONValue => {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return true;
+  }
+  
+  if (Array.isArray(value)) {
+    return value.every(isJSONValue);
+  }
+  
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).every(isJSONValue);
+  }
+  
+  return false;
+};
 
 /**
  * Brand types for domain modeling and type safety
@@ -247,4 +306,18 @@ export const createEmail = (value: string): EmailString => {
     throw new Error('Invalid email format');
   }
   return value.toLowerCase() as EmailString;
+};
+
+/**
+ * Safe JSON serialization that handles undefined values
+ */
+export const safeJSONStringify = (value: any): string => {
+  return JSON.stringify(cleanForJSON(value));
+};
+
+/**
+ * Convert any object to JSONValue safely
+ */
+export const toJSONValue = (obj: any): JSONValue => {
+  return cleanForJSON(obj);
 };

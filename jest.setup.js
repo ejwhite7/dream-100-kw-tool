@@ -32,7 +32,7 @@ global.fetch = jest.fn(() =>
     headers: new Headers(),
     clone: () => ({ json: () => Promise.resolve({}) })
   })
-) as jest.MockedFunction<typeof fetch>;
+);
 
 // Mock Sentry to prevent telemetry during tests
 jest.mock('@sentry/nextjs', () => ({
@@ -365,7 +365,7 @@ afterEach(() => {
   
   // Reset fetch mock
   if (global.fetch) {
-    (global.fetch as jest.MockedFunction<typeof fetch>).mockClear();
+    global.fetch.mockClear();
   }
 });
 

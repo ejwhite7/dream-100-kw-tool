@@ -75,7 +75,33 @@ export interface TemplateConfig {
     readonly includeFields: string[];
     readonly sortBy: string;
     readonly groupBy?: string;
-    readonly filters: Partial<ExportFilters>;
+    readonly filters: {
+      readonly keywords?: {
+        readonly stages?: string[];
+        readonly intents?: string[];
+        readonly minVolume?: number;
+        readonly maxVolume?: number;
+        readonly minDifficulty?: number;
+        readonly maxDifficulty?: number;
+        readonly minScore?: number;
+        readonly maxScore?: number;
+        readonly quickWinsOnly?: boolean;
+        readonly clusters?: string[];
+      };
+      readonly roadmap?: {
+        readonly stages?: string[];
+        readonly dris?: string[];
+        readonly dueDateFrom?: string;
+        readonly dueDateTo?: string;
+        readonly includeNotes?: boolean;
+      };
+      readonly clusters?: {
+        readonly minSize?: number;
+        readonly maxSize?: number;
+        readonly minScore?: number;
+        readonly primaryIntents?: string[];
+      };
+    };
   };
   readonly seoOps: {
     readonly includeFields: string[];
@@ -588,8 +614,9 @@ export class ExportService {
       });
     }
 
-    // Generate buffer
-    return await workbook.xlsx.writeBuffer() as any;
+    // Generate buffer with proper type casting
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
   }
 
   /**
@@ -926,9 +953,31 @@ export class ExportService {
   private buildTemplateFilters(template: string): ExportFilters {
     const templateConfig = this.templateConfigs.get(template);
     return {
-      keywords: templateConfig?.writers?.filters?.keywords || {},
-      roadmap: templateConfig?.writers?.filters?.roadmap || {},
-      clusters: templateConfig?.writers?.filters?.clusters || {}
+      keywords: {
+        stages: templateConfig?.writers?.filters?.keywords?.stages as any,
+        intents: templateConfig?.writers?.filters?.keywords?.intents as any,
+        minVolume: templateConfig?.writers?.filters?.keywords?.minVolume,
+        maxVolume: templateConfig?.writers?.filters?.keywords?.maxVolume,
+        minDifficulty: templateConfig?.writers?.filters?.keywords?.minDifficulty,
+        maxDifficulty: templateConfig?.writers?.filters?.keywords?.maxDifficulty,
+        minScore: templateConfig?.writers?.filters?.keywords?.minScore,
+        maxScore: templateConfig?.writers?.filters?.keywords?.maxScore,
+        quickWinsOnly: templateConfig?.writers?.filters?.keywords?.quickWinsOnly,
+        clusters: templateConfig?.writers?.filters?.keywords?.clusters
+      },
+      roadmap: {
+        stages: templateConfig?.writers?.filters?.roadmap?.stages as any,
+        dris: templateConfig?.writers?.filters?.roadmap?.dris,
+        dueDateFrom: templateConfig?.writers?.filters?.roadmap?.dueDateFrom,
+        dueDateTo: templateConfig?.writers?.filters?.roadmap?.dueDateTo,
+        includeNotes: templateConfig?.writers?.filters?.roadmap?.includeNotes
+      },
+      clusters: {
+        minSize: templateConfig?.writers?.filters?.clusters?.minSize,
+        maxSize: templateConfig?.writers?.filters?.clusters?.maxSize,
+        minScore: templateConfig?.writers?.filters?.clusters?.minScore,
+        primaryIntents: templateConfig?.writers?.filters?.clusters?.primaryIntents as any
+      }
     };
   }
 
@@ -938,8 +987,11 @@ export class ExportService {
     return {
       includeMetadata: true,
       includeAnalytics: templateConfig?.stakeholders?.includeAnalytics || false,
-      sortBy: templateConfig?.writers?.sortBy as any || 'score',
+      groupBy: templateConfig?.writers?.groupBy as 'cluster' | 'intent' | 'stage' | 'dri' | 'month' | undefined,
+      sortBy: (templateConfig?.writers?.sortBy as 'volume' | 'difficulty' | 'score' | 'date' | 'alphabetical') || 'score',
       sortDirection: 'desc',
+      maxRows: undefined,
+      customFields: [],
       formatting: {
         dateFormat: 'US',
         numberFormat: 'US',

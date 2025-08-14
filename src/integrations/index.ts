@@ -77,7 +77,7 @@ export class IntegrationFactory {
         this.ahrefs = AhrefsClient.getInstance(config.ahrefs.apiKey, config.redis);
         console.log('✓ Ahrefs integration initialized');
       } catch (error) {
-        console.error('✗ Failed to initialize Ahrefs:', error.message);
+        console.error('✗ Failed to initialize Ahrefs:', (error as Error).message);
         Sentry.captureException(error, { tags: { integration: 'ahrefs' } });
       }
     }
@@ -88,7 +88,7 @@ export class IntegrationFactory {
         this.anthropic = AnthropicClient.getInstance(config.anthropic.apiKey, config.redis);
         console.log('✓ Anthropic integration initialized');
       } catch (error) {
-        console.error('✗ Failed to initialize Anthropic:', error.message);
+        console.error('✗ Failed to initialize Anthropic:', (error as Error).message);
         Sentry.captureException(error, { tags: { integration: 'anthropic' } });
       }
     }
@@ -99,7 +99,7 @@ export class IntegrationFactory {
         this.scraper = WebScraper.getInstance(config.redis);
         console.log('✓ Web scraper integration initialized');
       } catch (error) {
-        console.error('✗ Failed to initialize Web scraper:', error.message);
+        console.error('✗ Failed to initialize Web scraper:', (error as Error).message);
         Sentry.captureException(error, { tags: { integration: 'scraper' } });
       }
     }

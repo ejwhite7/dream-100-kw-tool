@@ -88,7 +88,7 @@ export abstract class BaseApiClient {
         const canProceed = await this.checkRateLimit();
         if (!canProceed) {
           this.metrics.rateLimitHits++;
-          throw ErrorHandler.createRateLimitError(
+          throw (ErrorHandler as any).createRateLimitError(
             {
               limit: (this.rateLimiter as any).config?.capacity || 0,
               remaining: this.rateLimiter.getRemainingTokens(),
@@ -140,7 +140,8 @@ export abstract class BaseApiClient {
       const apiError = error as ApiError;
       
       // Circuit breaker tracking
-      if (error.message?.includes('Circuit breaker')) {
+      const errorMessage = (error as Error).message;
+      if (errorMessage && errorMessage.includes('Circuit breaker')) {
         this.metrics.circuitBreakerTrips++;
       }
       
@@ -149,13 +150,13 @@ export abstract class BaseApiClient {
       this.trackUsage(endpoint, method, apiError.statusCode || 500, responseTime, cost, false);
       
       // Enhanced error context
-      const enhancedError = ErrorHandler.handle(error as Error, {
+      const enhancedError = (ErrorHandler as any).handle(error as Error, {
         provider: this.provider,
         endpoint,
         method,
         requestId,
         responseTime
-      });
+      }) as ApiError;
       
       throw enhancedError;
     }
@@ -179,12 +180,18 @@ export abstract class BaseApiClient {
     }
     
     // For async rate limiters
-    return await (this.rateLimiter as any).tryConsume?.() || true;
+    const tryConsumeMethod = (this.rateLimiter as any).tryConsume;
+    if (typeof tryConsumeMethod === 'function') {
+      return await tryConsumeMethod.call(this.rateLimiter);
+    }
+    
+    return true;
   }
   
   private getRateLimitInfo() {
+    const config = (this.rateLimiter as any).config;
     return {
-      limit: (this.rateLimiter as any).config?.capacity || 0,
+      limit: config?.capacity || 0,
       remaining: this.rateLimiter.getRemainingTokens(),
       reset: Math.ceil(this.rateLimiter.getNextRefillTime() / 1000)
     };
@@ -224,7 +231,7 @@ export abstract class BaseApiClient {
   
   private cleanExpiredCache(): void {
     const now = Date.now();
-    for (const [key, value] of this.cache.entries()) {
+    for (const [key, value] of Array.from(this.cache.entries())) {
       if (now > value.timestamp + value.ttl) {
         this.cache.delete(key);
       }
@@ -284,7 +291,12 @@ export abstract class BaseApiClient {
   }
   
   public getRateLimiterStatus() {
-    return (this.rateLimiter as any).getStatus?.() || {
+    const getStatusMethod = (this.rateLimiter as any).getStatus;
+    if (typeof getStatusMethod === 'function') {
+      return getStatusMethod.call(this.rateLimiter);
+    }
+    
+    return {
       tokens: this.rateLimiter.getRemainingTokens(),
       nextRefill: this.rateLimiter.getNextRefillTime()
     };

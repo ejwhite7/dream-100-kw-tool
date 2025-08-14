@@ -89,7 +89,7 @@ describe('Monitoring System', () => {
     
     const keywordStats = monitoring.businessMetrics.getKeywordProcessingStats();
     expect(keywordStats.dream100).toBeDefined();
-    expect(keywordStats.dream100.totalKeywords).toBe(100);
+    expect(keywordStats.dream100?.totalKeywords).toBe(100);
   });
 
   it('should track costs', () => {
@@ -121,7 +121,7 @@ describe('Monitoring System', () => {
     
     const activeAlerts = monitoring.alertManager.getActiveAlerts();
     expect(activeAlerts.length).toBeGreaterThan(0);
-    expect(activeAlerts[0].message).toBe('Test alert');
+    expect(activeAlerts[0]?.message).toBe('Test alert');
     
     const resolved = monitoring.alertManager.resolveAlert(alertId, 'Test resolved');
     expect(resolved).toBe(true);
@@ -171,7 +171,7 @@ describe('Monitoring System', () => {
     
     const sloStatus = monitoring.sloManager.getSLOStatus('test-service');
     expect(sloStatus.length).toBeGreaterThan(0);
-    expect(sloStatus[0].target.service).toBe('test-service');
+    expect(sloStatus[0]?.target.service).toBe('test-service');
   });
 
   it('should provide health status', () => {
@@ -232,12 +232,24 @@ describe('Monitoring API Integration', () => {
   
   beforeEach(() => {
     // Mock fetch for API calls
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ status: 'success' })
-      })
-    ) as jest.MockedFunction<typeof fetch>;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers(),
+      redirected: false,
+      type: 'basic' as ResponseType,
+      url: '',
+      clone: jest.fn(),
+      body: null,
+      bodyUsed: false,
+      arrayBuffer: jest.fn(),
+      blob: jest.fn(),
+      formData: jest.fn(),
+      text: jest.fn(),
+      json: jest.fn().mockResolvedValue({ status: 'success' }),
+      bytes: jest.fn()
+    } as Response);
   });
   
   afterEach(() => {

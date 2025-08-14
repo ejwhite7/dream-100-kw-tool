@@ -105,7 +105,7 @@ test.describe('Complete Keyword Research Workflow', () => {
       const firstKeyword = keywordRows.first();
       await expect(firstKeyword.locator('.keyword-text')).not.toBeEmpty();
       await expect(firstKeyword.locator('.stage')).toHaveText(/^(dream100|tier2|tier3)$/);
-      await expect(firstKeyword.locator('.score')).toMatch(/^\d+\.\d{3}$/);
+      await expect(firstKeyword.locator('.score')).toHaveText(/^\d+\.\d{3}$/);
     });
 
     // Step 4: Test keyword filtering and sorting

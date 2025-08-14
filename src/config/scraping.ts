@@ -27,10 +27,10 @@ export const SECURITY_CONFIG = {
   
   // Content filtering patterns
   DANGEROUS_PATTERNS: [
-    /<script[^>]*>.*?<\/script>/gis,
-    /<iframe[^>]*>.*?<\/iframe>/gis,
-    /<object[^>]*>.*?<\/object>/gis,
-    /<embed[^>]*>.*?<\/embed>/gis,
+    /<script[^>]*>[\s\S]*?<\/script>/gi,
+    /<iframe[^>]*>[\s\S]*?<\/iframe>/gi,
+    /<object[^>]*>[\s\S]*?<\/object>/gi,
+    /<embed[^>]*>[\s\S]*?<\/embed>/gi,
     /javascript:/gi,
     /vbscript:/gi,
     /data:(?!image\/(png|jpeg|gif|webp))[^;]*/gi

@@ -400,29 +400,7 @@ export interface Database {
 }
 
 // Additional type definitions for application use
-export interface ScoringWeights {
-  dream100: {
-    volume: number
-    intent: number
-    relevance: number
-    trend: number
-    ease: number
-  }
-  tier2: {
-    volume: number
-    ease: number
-    relevance: number
-    intent: number
-    trend: number
-  }
-  tier3: {
-    ease: number
-    relevance: number
-    volume: number
-    intent: number
-    trend: number
-  }
-}
+import type { ScoringWeights } from '../models/scoring';
 
 export interface RunSettings {
   max_keywords?: number
@@ -435,6 +413,9 @@ export interface RunSettings {
   quick_win_threshold?: number
   [key: string]: any
 }
+
+// Re-export for convenience
+export type { ScoringWeights }
 
 export interface ApiUsage {
   ahrefs?: {

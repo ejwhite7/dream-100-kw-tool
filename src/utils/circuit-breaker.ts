@@ -10,7 +10,7 @@ export class CircuitBreaker {
   private readonly failureWindow: number[] = [];
   
   constructor(
-    private config: CircuitBreakerConfig,
+    protected config: CircuitBreakerConfig,
     private name: string
   ) {}
   
@@ -33,7 +33,7 @@ export class CircuitBreaker {
     }
   }
   
-  private onSuccess(): void {
+  protected onSuccess(): void {
     this.failures = 0;
     this.removeOldFailures();
     
@@ -50,7 +50,7 @@ export class CircuitBreaker {
     }
   }
   
-  private onFailure(error: Error): void {
+  protected onFailure(error: Error): void {
     this.failures++;
     this.lastFailureTime = Date.now();
     this.failureWindow.push(this.lastFailureTime);
@@ -172,17 +172,17 @@ export class ExponentialBackoffCircuitBreaker extends CircuitBreaker {
     this.currentBackoffLevel++;
     
     // Override the recovery timeout with backoff time
-    (this as any).config.recoveryTimeout = backoffTime;
+    (this.config as any).recoveryTimeout = backoffTime;
     
-    super['onFailure'](error);
+    super.onFailure(error);
   }
   
   protected onSuccess(): void {
     // Reset backoff on success
     this.currentBackoffLevel = 0;
-    (this as any).config.recoveryTimeout = this.baseRecoveryTimeout;
+    (this.config as any).recoveryTimeout = this.baseRecoveryTimeout;
     
-    super['onSuccess']();
+    super.onSuccess();
   }
 }
 
