@@ -1,36 +1,18 @@
+// This file configures the initialization of Sentry on the server.
+// The config you add here will be used whenever the server handles a request.
+// https://docs.sentry.io/platforms/javascript/guides/nextjs/
+
 import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
-  dsn: process.env.SENTRY_DSN,
-  environment: process.env.NODE_ENV || 'development',
-  
-  // Server-side performance monitoring
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  
-  // Enhanced server-side error context
-  beforeSend(event, hint) {
-    // Sanitize sensitive data
-    if (event.request?.headers) {
-      delete event.request.headers['authorization'];
-      delete event.request.headers['x-api-key'];
-    }
-    
-    // Filter out expected errors
-    if (event.exception) {
-      const error = event.exception.values?.[0];
-      if (error?.value?.includes('ECONNRESET')) {
-        return null;
-      }
-    }
-    
-    return event;
-  },
-  
-  // Custom tags for server components
-  initialScope: {
-    tags: {
-      component: 'server',
-      feature: 'keyword-engine',
-    },
-  },
+  dsn: "https://30c9cb37cad4c71f5145738a61387285@o4509840593321984.ingest.us.sentry.io/4509844896481280",
+
+  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
+  tracesSampleRate: 1,
+
+  // Enable logs to be sent to Sentry
+  enableLogs: true,
+
+  // Setting this option to true will print useful information to the console while you're setting up Sentry.
+  debug: false,
 });
